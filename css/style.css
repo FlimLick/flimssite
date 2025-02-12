@@ -1,0 +1,126 @@
+:root {
+    --navbar-brand: "Ashton's Portfolio";
+    --footer-text: "© 2024 Audio Engineer Portfolio. Created by Ashton Clouse";
+    --background-color: #0e0e0e;
+    --input-background: #2c2c2c;
+    --input-text-color: #f2f2f2;
+    --input-border-color: #555555;
+    --input-placeholder-color: #888888;
+}
+
+
+body {
+    font-family: 'Oswald', sans-serif;
+    background-color: var(--background-color);
+    color: var(--input-text-color);
+    margin: 0;
+    padding-bottom: 60px; /* To ensure footer isn't overlaid on content */
+}
+
+.navbar {
+    background-color: #8b0000;
+    border: none;
+}
+
+.navbar-brand::after {
+    content: var(--navbar-brand);
+}
+
+.navbar-brand, .navbar-nav li a {
+    color: var(--input-text-color) !important;
+}
+
+.navbar-default .navbar-nav>li>a {
+    color: var(--input-text-color); /* Default color */
+    transition: color 0.3s; /* Add transition for smooth hover effect */
+}
+
+.navbar-default .navbar-nav>li>a:hover {
+    color: #ffffff; /* Change color on hover */
+}
+
+.jumbotron {
+    background: url('../images/jumbotron-bg.jpg') no-repeat center center;
+    background-size: cover;
+    color: #fff;
+    text-align: center;
+    padding: 150px 25px;
+    margin-bottom: 0;
+}
+
+.jumbotron h1 {
+    font-size: 3em;
+    margin-bottom: 20px;
+}
+
+.jumbotron p {
+    font-size: 1.5em;
+}
+
+.section {
+    padding: 60px 0;
+}
+
+.section img {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 15px;
+}
+
+.footer {
+    background-color: #1a1a1a;
+    color: var(--input-text-color);
+    text-align: center;
+    padding: 20px 0;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+}
+
+.footer::after {
+    content: var(--footer-text);
+}
+
+.btn-custom {
+    background-color: #8b0000;
+    color: var(--input-text-color);
+    border: none;
+}
+
+.btn-custom:hover {
+    background-color: #660000;
+}
+
+.form-control {
+    background-color: var(--input-background);
+    color: var(--input-text-color);
+    border: 1px solid var(--input-border-color);
+}
+
+.form-control::placeholder {
+    color: var(--input-placeholder-color);
+}
+
+/* Add or modify these styles */
+/* Add or modify these styles */
+
+.about-container {
+    border: 2px solid #8b0000; /* Set border color and width */
+    border-radius: 10px; /* Add border radius for rounded corners */
+    padding: 30px; /* Add padding for spacing inside the box */
+}
+
+.about-section {
+    padding: 60px 0;
+}
+
+.about-text {
+    font-size: 1.6em;
+    line-height: 1.6;
+    text-align: center;
+}
+
+.about-title {
+    text-align: left;
+    margin-bottom: 40px;
+}
