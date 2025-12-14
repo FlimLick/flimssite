@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Manual WebRTC P2P Chat (STUN, no servers)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; max-width: 980px; }
+    h1 { margin: 0 0 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; background: #fafafa; }
+    label { display:block; font-size: 12px; opacity: 0.75; margin: 10px 0 4px; }
+    textarea { width: 100%; min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; padding: 10px; box-sizing: border-box; }
+    input, button { padding: 10px; font-size: 14px; }
+    button { cursor: pointer; }
+    .row { display:flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    #log { height: 260px; overflow:auto; border:1px solid #ddd; border-radius: 10px; padding:10px; background:#fff; white-space: pre-wrap; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eee; font-size:12px; }
+    .muted { opacity: 0.75; }
+  </style>
+</head>
+<body>
+  <h1>Manual WebRTC P2P Chat</h1>
+  <div class="row">
+    <span class="pill" id="status">idle</span>
+    <span class="muted">No signaling server. Copy/paste “Offer Bundle” and “Answer Bundle”. Uses public STUN only.</span>
+  </div>
+
+  <div class="grid" style="margin-top: 12px;">
+    <div class="card">
+      <h3 style="margin:0 0 8px;">Step 1 — Caller (creates offer)</h3>
+      <div class="row">
+        <button id="createOfferBtn">Create Offer Bundle</button>
+        <button id="applyAnswerBtn" disabled>Apply Answer Bundle</button>
+      </div>
+
+      <label>Offer Bundle (copy this to the other device)</label>
+      <textarea id="offerOut" placeholder="Click “Create Offer Bundle”…" readonly></textarea>
+
+      <label>Paste Answer Bundle here (from the other device)</label>
+      <textarea id="answerIn" placeholder="Paste Answer Bundle here…"></textarea>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px;">Step 2 — Joiner (creates answer)</h3>
+      <div class="row">
+        <button id="applyOfferBtn">Apply Offer + Create Answer Bundle</button>
+      </div>
+
+      <label>Paste Offer Bundle here (from the caller)</label>
+      <textarea id="offerIn" placeholder="Paste Offer Bundle here…"></textarea>
+
+      <label>Answer Bundle (copy this back to the caller)</label>
+      <textarea id="answerOut" placeholder="Will appear after you apply the offer…" readonly></textarea>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 12px;">
+    <h3 style="margin:0 0 8px;">Chat</h3>
+    <div id="log"></div>
+    <div class="row" style="margin-top: 10px;">
+      <input id="msg" type="text" placeholder="Type message…" style="flex:1; min-width: 240px;" />
+      <button id="sendBtn" disabled>Send</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const logEl = $("log");
+    const statusEl = $("status");
+
+    function log(line) {
+      const t = new Date().toLocaleTimeString();
+      logEl.textContent += `[${t}] ${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setStatus(s) { statusEl.textContent = s; }
+
+    // Public STUN only (no TURN). This enables ICE to attempt NAT hole punching.
+    const rtcConfig = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun.cloudflare.com:3478" }
+      ],
+      iceTransportPolicy: "all"
+    };
+
+    let pc = null;
+    let dc = null;
+    let localCandidates = [];
+    let role = null; // "caller" or "joiner"
+
+    function reset() {
+      if (dc) { try { dc.close(); } catch {} dc = null; }
+      if (pc) { try { pc.close(); } catch {} pc = null; }
+      localCandidates = [];
+      role = null;
+      $("sendBtn").disabled = true;
+      $("applyAnswerBtn").disabled = true;
+      setStatus("idle");
+    }
+
+    function ensurePC() {
+      if (pc) return pc;
+
+      pc = new RTCPeerConnection(rtcConfig);
+      localCandidates = [];
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) localCandidates.push(e.candidate.toJSON());
+      };
+
+      pc.onicegatheringstatechange = () => {
+        log(`ICE gathering: ${pc.iceGatheringState}`);
+      };
+
+      pc.onconnectionstatechange = () => {
+        log(`PC state: ${pc.connectionState}`);
+        setStatus(pc.connectionState);
+        if (pc.connectionState === "connected") {
+          $("sendBtn").disabled = false;
+        }
+        if (["failed","disconnected","closed"].includes(pc.connectionState)) {
+          $("sendBtn").disabled = true;
+        }
+      };
+
+      pc.ondatachannel = (e) => {
+        dc = e.channel;
+        wireDataChannel();
+      };
+
+      return pc;
+    }
+
+    function wireDataChannel() {
+      if (!dc) return;
+
+      dc.onopen = () => {
+        log("DataChannel open (P2P established if ICE succeeded).");
+        $("sendBtn").disabled = false;
+      };
+      dc.onclose = () => {
+        log("DataChannel closed.");
+        $("sendBtn").disabled = true;
+      };
+      dc.onerror = (err) => log(`DataChannel error: ${err?.message || err}`);
+      dc.onmessage = (e) => log(`peer: ${e.data}`);
+    }
+
+    async function waitForIceGatheringComplete(peer) {
+      if (peer.iceGatheringState === "complete") return;
+      await new Promise((resolve) => {
+        const check = () => {
+          if (peer.iceGatheringState === "complete") {
+            peer.removeEventListener("icegatheringstatechange", check);
+            resolve();
+          }
+        };
+        peer.addEventListener("icegatheringstatechange", check);
+      });
+    }
+
+    function makeBundle(description, candidates) {
+      return {
+        v: 1,
+        ts: Date.now(),
+        description,
+        candidates
+      };
+    }
+
+    function parseBundle(text) {
+      let obj;
+      try { obj = JSON.parse(text); } catch { throw new Error("Invalid JSON bundle."); }
+      if (!obj || !obj.description || !obj.description.type || !obj.description.sdp) {
+        throw new Error("Bundle missing 'description'.");
+      }
+      if (!Array.isArray(obj.candidates)) obj.candidates = [];
+      return obj;
+    }
+
+    async function addRemoteCandidates(peer, candidates) {
+      for (const c of candidates || []) {
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(c));
+        } catch (e) {
+          // Some browsers may throw if candidate is redundant; log and continue.
+          log(`addIceCandidate warning: ${e.message}`);
+        }
+      }
+    }
+
+    // ---- Caller flow: Create offer bundle ----
+    $("createOfferBtn").onclick = async () => {
+      reset();
+      role = "caller";
+      setStatus("creating-offer");
+      log("Caller: creating offer…");
+
+      const pc = ensurePC();
+
+      // Caller must create DataChannel before offer so it's negotiated.
+      dc = pc.createDataChannel("chat");
+      wireDataChannel();
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await waitForIceGatheringComplete(pc);
+
+      const bundle = makeBundle(pc.localDescription, localCandidates);
+      $("offerOut").value = JSON.stringify(bundle);
+      $("applyAnswerBtn").disabled = false;
+
+      log("Caller: offer bundle ready. Copy it to the other device.");
+      setStatus("offer-ready");
+    };
+
+    // ---- Joiner flow: Apply offer, create answer bundle ----
+    $("applyOfferBtn").onclick = async () => {
+      reset();
+      role = "joiner";
+      setStatus("applying-offer");
+      log("Joiner: applying offer…");
+
+      const offerText = $("offerIn").value.trim();
+      if (!offerText) { log("Joiner: paste Offer Bundle first."); setStatus("idle"); return; }
+
+      let offerBundle;
+      try { offerBundle = parseBundle(offerText); }
+      catch (e) { log(`Joiner: ${e.message}`); setStatus("idle"); return; }
+
+      const pc = ensurePC();
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offerBundle.description));
+      await addRemoteCandidates(pc, offerBundle.candidates);
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await waitForIceGatheringComplete(pc);
+
+      const answerBundle = makeBundle(pc.localDescription, localCandidates);
+      $("answerOut").value = JSON.stringify(answerBundle);
+
+      log("Joiner: answer bundle ready. Copy it back to the caller.");
+      setStatus("answer-ready");
+    };
+
+    // ---- Caller: Apply answer bundle ----
+    $("applyAnswerBtn").onclick = async () => {
+      if (role !== "caller") { log("Caller: create an offer first."); return; }
+
+      const answerText = $("answerIn").value.trim();
+      if (!answerText) { log("Caller: paste Answer Bundle first."); return; }
+
+      let answerBundle;
+      try { answerBundle = parseBundle(answerText); }
+      catch (e) { log(`Caller: ${e.message}`); return; }
+
+      setStatus("applying-answer");
+      log("Caller: applying answer…");
+
+      const pc = ensurePC();
+
+      await pc.setRemoteDescription(new RTCSessionDescription(answerBundle.description));
+      await addRemoteCandidates(pc, answerBundle.candidates);
+
+      log("Caller: answer applied. Waiting for connection…");
+      setStatus("connecting");
+    };
+
+    // ---- Chat send ----
+    $("sendBtn").onclick = () => {
+      const text = $("msg").value;
+      if (!text) return;
+      if (!dc || dc.readyState !== "open") { log("Send failed: DataChannel not open."); return; }
+      dc.send(text);
+      log(`me: ${text}`);
+      $("msg").value = "";
+      $("msg").focus();
+    };
+
+    $("msg").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("sendBtn").click();
+    });
+
+    // Initial log
+    log("Instructions:");
+    log("1) On device A: click “Create Offer Bundle”, copy Offer Bundle to device B.");
+    log("2) On device B: paste Offer Bundle, click “Apply Offer + Create Answer Bundle”, copy Answer Bundle to device A.");
+    log("3) On device A: paste Answer Bundle, click “Apply Answer Bundle”.");
+    log("4) If NAT/Firewall blocks direct P2P (common on enterprise/cellular), this will fail without TURN.");
+  </script>
+</body>
+</html>
