@@ -1,97 +1,1131 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Manual WebRTC P2P Chat (Compressed Base64 Bundles)</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Manual WebRTC P2P Chat</title>
 
-  <!-- Compression library (public CDN, no upkeep) -->
-  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <!-- Compression library (public CDN, no upkeep) -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 16px; max-width: 980px; }
-    h1 { margin: 0 0 10px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; background: #fafafa; }
-    label { display:block; font-size: 12px; opacity: 0.75; margin: 10px 0 4px; }
-    textarea {
+    <style>
+    :root {
+      --bg: #151013;
+      --bg-2: #1c1518;
+      --card: rgba(34, 20, 22, 0.68);
+      --ink: #f8efef;
+      --muted: #d7c1c1;
+      --accent: #ff3f3f;
+      --accent-2: #ff8a7a;
+      --border: rgba(255, 77, 77, 0.5);
+      --highlight: rgba(255,255,255,0.16);
+      --shadow: rgba(0,0,0,0.5);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas, monospace;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      max-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      color: var(--ink);
+      background:
+        radial-gradient(120% 120% at 15% 10%, rgba(255, 63, 63, 0.12), transparent 40%),
+        radial-gradient(120% 120% at 85% 0%, rgba(255, 138, 122, 0.12), transparent 45%),
+        linear-gradient(145deg, #120d10, #0c090b);
+      box-shadow: 0 0 30px rgba(0,0,0,0.45) inset;
+    }
+    .page {
       width: 100%;
-      min-height: 120px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 12px;
-      padding: 10px;
-      box-sizing: border-box;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+      padding-top: 12px;
     }
-    input, button { padding: 10px; font-size: 14px; }
-    button { cursor: pointer; }
-    .row { display:flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .pad-wrap { padding: 0 16px; }
+    .section-wrap { padding: 6px 16px; margin-top: 2px; }
+    h1 { margin: 0 0 4px; letter-spacing: 2px; font-family: "Poppins", "Helvetica Neue", Arial, sans-serif; font-weight: 200; }
+    h3 { margin: 0 0 6px; font-size: 15px; color: var(--accent-2); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card,
+    textarea,
+    input,
+    button,
+    #log,
+    .pill,
+    .log-line,
+    .note,
+    .beta-tag,
+    .debug-card,
+    .debug-box {
+      border-width: 1.5px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(20,15,16,0.95));
+      box-shadow:
+        0 10px 28px rgba(0,0,0,0.6),
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 0 rgba(0,0,0,0.4);
+    }
+    label { display:block; font-size: 12px; color: var(--muted); margin: 10px 0 6px; letter-spacing: 0.3px; }
+    textarea, input, button {
+      font-family: inherit;
+    }
+    textarea, input {
+      width: 100%;
+      min-height: 90px;
+      font-size: 13px;
+      padding: 12px;
+      color: var(--ink);
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(17,10,11,0.95));
+      border: 1px solid rgba(231,76,60,0.22);
+      border-radius: 12px;
+      outline: none;
+      box-shadow:
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 3px rgba(0,0,0,0.5);
+      transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease, transform 120ms ease;
+      resize: none;
+    }
+    input { min-height: 0; }
+    textarea:hover, input:hover { border-color: var(--accent-2); }
+    textarea:focus, input:focus {
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 3px rgba(231, 76, 60, 0.25),
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 3px rgba(0,0,0,0.45);
+      transform: translateY(-1px);
+    }
+    button {
+      padding: 10px 12px;
+      font-size: 13px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(36,24,26,0.9));
+      color: var(--ink);
+      cursor: pointer;
+      box-shadow:
+        0 6px 14px var(--shadow),
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 3px rgba(0,0,0,0.5);
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 150ms ease;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45), inset 0 1px 0 var(--highlight);
+      border-color: var(--accent);
+      background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(46,30,32,0.9));
+    }
+    button:active {
+      transform: translateY(0);
+      background: linear-gradient(180deg, rgba(30,20,21,0.9), rgba(20,13,14,0.9));
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+      background: #0f0b0c;
+    }
+    .row { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     #log {
-      height: 260px;
+      flex: 1;
+      min-height: 0;
       overflow:auto;
-      border:1px solid #ddd;
-      border-radius: 10px;
-      padding:10px;
-      background:#fff;
-      white-space: pre-wrap;
+      border:1px solid var(--border);
+      border-radius: 12px;
+      padding:12px 14px;
+      background: linear-gradient(180deg, rgba(18,12,13,0.9), rgba(10,7,8,0.95));
+      box-shadow:
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 3px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eee; font-size:12px; }
+    .pill {
+      display:inline-block;
+      padding:6px 10px;
+      border-radius:999px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(22,14,16,0.92));
+      font-size:12px;
+      border: 1px solid var(--border);
+      color: var(--accent-2);
+      box-shadow:
+        0 6px 12px rgba(0,0,0,0.35),
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 3px rgba(0,0,0,0.45);
+    }
+    .pill.connecting {
+      background: linear-gradient(180deg, rgba(255, 195, 113, 0.28), rgba(255, 166, 43, 0.22));
+      border-color: #ff9f43;
+      color: #ffb347;
+      box-shadow:
+        0 6px 12px rgba(0,0,0,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.2),
+        inset 0 -1px 3px rgba(0,0,0,0.4);
+    }
+    .pill.connected {
+      background: linear-gradient(180deg, rgba(82, 232, 175, 0.26), rgba(52, 211, 153, 0.22));
+      border-color: #34d399;
+      color: #d1fae5;
+      box-shadow:
+        0 6px 12px rgba(0,0,0,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.2),
+        inset 0 -1px 3px rgba(0,0,0,0.4);
+    }
+    .subtitle { color: var(--muted); font-size: 13px; letter-spacing: 0.3px; }
+    .note {
+      margin: 4px 0 2px;
+      padding: 10px 12px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: rgba(255, 59, 59, 0.05);
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .note strong { display:block; margin-bottom: 6px; }
+    .note ol { margin: 4px 0 0; padding-left: 18px; }
+    .note li { margin-bottom: 4px; }
+    .log-line {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 8px 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(26,18,20,0.92));
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow:
+        inset 0 1px 0 var(--highlight),
+        inset 0 -1px 3px rgba(0,0,0,0.45),
+        0 6px 16px rgba(0,0,0,0.35);
+      width: 100%;
+      position: relative;
+    }
+    .log-line.self {
+      background: linear-gradient(180deg, rgba(255,77,77,0.04), rgba(28,18,19,0.9));
+      font-weight: 600;
+      font-style: italic;
+    }
+    .log-line.peer { background: linear-gradient(180deg, rgba(255,138,122,0.04), rgba(32,22,23,0.9)); }
+    .log-line.expired { opacity: 0.45; }
+    .log-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    .log-time { color: var(--muted); font-size: 12px; }
+    .log-badge {
+      padding: 2px 10px;
+      border-radius: 999px;
+      border: 1.5px solid rgba(255,255,255,0.08);
+      font-size: 12px;
+      color: #f2e8e8;
+      background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(52,42,44,0.82));
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        inset 0 -1px 3px rgba(0,0,0,0.35),
+        0 3px 8px rgba(0,0,0,0.18);
+    }
+    .log-line.self .log-badge {
+      color: #f9eded;
+      background: linear-gradient(180deg, rgba(255,180,170,0.25), rgba(70,40,42,0.9));
+      border-color: rgba(255,140,120,0.4);
+    }
+    .log-line.peer .log-badge {
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(46,34,36,0.85));
+      color: #f1e5e5;
+    }
+    .log-body {
+      color: var(--ink);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+    }
+    .log-body button { margin-left: auto; white-space: nowrap; }
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    .progress-row .bar-wrap {
+      flex: 1;
+    }
+    .log-line.info .log-badge { display: none; }
+    .note {
+      margin: 4px 0 2px;
+      padding: 10px 12px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: rgba(255, 59, 59, 0.05);
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .note strong { display: block; margin-bottom: 6px; }
+    .note ol { margin: 4px 0 0; padding-left: 18px; }
+    .note li { margin-bottom: 4px; }
+    .hide { display: none !important; }
+    .role-toggle button.is-active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(255, 59, 59, 0.25);
+    }
+    .top-actions {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      z-index: 10;
+    }
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .title-stack {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .beta-tag {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 59, 59, 0.15);
+      color: var(--accent-2);
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .disclaimer {
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: rgba(255, 59, 59, 0.04);
+      line-height: 1.45;
+    }
+    .debug-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 20;
+    }
+    .debug-modal.show { display: flex; }
+    .debug-card {
+      width: min(960px, 100%);
+      max-height: 90vh;
+      background: #0f0a0c;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .debug-card header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .debug-card pre {
+      background: #0b0b0b;
+      color: #f5dada;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin: 0;
+      max-height: 70vh;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .debug-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 10px;
+    }
+    .debug-box {
+      background: #0b0b0b;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .debug-box h4 {
+      margin: 0;
+      font-size: 13px;
+      color: var(--accent-2);
+      letter-spacing: 0.3px;
+    }
+    .debug-box .rowline {
+      font-size: 12px;
+      color: var(--ink);
+      word-break: break-word;
+    }
+    .debug-box pre {
+      max-height: 240px;
+    }
+    .inline-label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.3px;
+    }
+    .chat-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .role-toggle { justify-content: space-between; align-items: center; }
+    .role-left { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .status-inline { margin-left: auto; }
+    .chat-name-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+      min-width: 260px;
+    }
+    .chat-name-row input {
+      flex: 1;
+      min-width: 180px;
+      max-width: 260px;
+    }
+    .chat-name-row button {
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .card.collapsed {
+      max-height: 46px;
+      overflow: hidden;
+      opacity: 0.65;
+      cursor: pointer;
+    }
+    .card.collapsed > :not(h3) { display: none; }
+    .attachment-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+    }
+    .visually-hidden-input { position: absolute; left: -9999px; opacity: 0; }
+    .attach-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+    }
+    .field-pair {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      width: 100%;
+    }
+    .copy-box {
+      user-select: none;
+      cursor: pointer;
+      caret-color: transparent;
+    }
+    .copy-box:focus { outline: none; }
+    @media (max-width: 715px) {
+      .page-header {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 6px;
+      }
+      .top-actions {
+        position: static;
+        justify-content: center;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+    }
+    .log-body .thumb {
+      display: block;
+      margin-top: 6px;
+      max-width: 260px;
+      max-height: 260px;
+      object-fit: contain;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .image-box {
+      max-width: 320px;
+      max-height: 320px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 6px;
+      background: rgba(255,59,59,0.05);
+    }
+    .image-box img {
+      display: block;
+      width: 100%;
+      height: auto;
+      object-fit: contain;
+    }
   </style>
-</head>
-<body>
+  </head>
+  <body>
 
-<h1>Manual WebRTC P2P Chat</h1>
-<div class="row">
-  <span class="pill" id="status">idle</span>
-  <span>Public STUN only · No servers · Compressed base64 bundles</span>
-</div>
+    <div class="page">
+      <div class="page-header pad-wrap">
+        <div class="title-stack">
+          <h1>Manual WebRTC P2P Chat</h1>
+          <span class="beta-tag">Beta</span>
+        </div>
+        <div class="top-actions" style="position:static;">
+          <button id="debugToggle">Debug</button>
+          <button id="noteToggle">Show instructions</button>
+        </div>
+      </div>
+      <div class="disclaimer pad-wrap" id="disclaimer">
+        Security note: direct P2P via STUN with manual bundle exchange; no relay or auth. Only share bundles with people you trust and avoid sensitive data.
+        <div class="row" style="margin-top:8px;">
+          <button id="ackNoteBtn">Acknowledge</button>
+        </div>
+      </div>
+      <div id="howTo" class="note hide pad-wrap">
+        <strong>How to connect</strong>
+        <ol>
+          <li>Caller: click Create Offer, then copy the Base64 bundle.</li>
+          <li>Joiner: paste that bundle, click Apply Offer & Create Answer, then copy the new bundle.</li>
+          <li>Caller: paste the answer bundle and connect. Chat once status is connected.</li>
+        </ol>
+        Two computers connect peer-to-peer via STUN. Bundle strings stay local; no signaling or servers
+        involved.
+      </div>
+      <div class="row role-toggle pad-wrap">
+        <div class="role-left">
+          <button id="chooseCaller">Be Caller/Host</button>
+          <button id="chooseJoiner">Be Joiner</button>
+        </div>
+        <span class="pill status-inline" id="statusChat">idle</span>
+      </div>
+      <div id="callerSection" class="section-wrap hide">
+        <div class="card">
+          <h3 id="callerHeader">Caller</h3>
+          <div class="row">
+            <button id="createOfferBtn">Create Offer</button>
+            <button id="applyAnswerBtn" disabled>Apply Answer</button>
+          </div>
+          <div class="field-pair">
+            <div>
+              <label>Offer (copy)</label>
+              <textarea id="offerOut" class="copy-box" readonly></textarea>
+            </div>
+            <div>
+              <label>Paste Answer</label>
+              <textarea id="answerIn"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
 
-<div class="grid" style="margin-top: 12px;">
-  <div class="card">
-    <h3>Caller</h3>
-    <div class="row">
-      <button id="createOfferBtn">Create Offer</button>
-      <button id="applyAnswerBtn" disabled>Apply Answer</button>
-    </div>
+      <div id="joinerSection" class="section-wrap hide">
+        <div class="card">
+          <h3 id="joinerHeader">Joiner</h3>
+          <button id="applyOfferBtn">Apply Offer & Create Answer</button>
 
-    <label>Offer (copy)</label>
-    <textarea id="offerOut" readonly></textarea>
+          <div class="field-pair">
+            <div>
+              <label>Paste Offer</label>
+              <textarea id="offerIn"></textarea>
+            </div>
+            <div>
+              <label>Answer (copy)</label>
+              <textarea id="answerOut" class="copy-box" readonly></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
 
-    <label>Paste Answer</label>
-    <textarea id="answerIn"></textarea>
+      <div class="card chat-card" style="margin-top: 2px; width: 100%; padding: 12px; border: none; border-radius: 0;">
+        <div class="chat-header">
+          <h3 style="margin:0;">Chat</h3>
+          <div class="chat-name-row">
+            <input id="name" placeholder="Random username">
+            <button id="setNameBtn">Set username</button>
+          </div>
+        </div>
+        <div id="log"></div>
+        <div id="chatControls" class="row hide" style="margin-top: 10px; gap: 8px;">
+          <button id="attachBtn" disabled>Attach file</button>
+          <input id="msg" placeholder="message…" style="flex:1">
+          <span id="attachInfo" class="hide" style="flex:1; color: var(--muted); font-size: 12px;"></span>
+          <button id="sendBtn" disabled>Send</button>
+          <input type="file" id="attachInput" class="visually-hidden-input">
+        </div>
+      </div>
+      <div id="debugModal" class="debug-modal">
+        <div class="debug-card">
+          <header>
+            <strong>Debug info</strong>
+            <button id="debugClose">Close</button>
+          </header>
+          <pre id="debugContent">Loading…</pre>
+        </div>
+      </div>
   </div>
 
-  <div class="card">
-    <h3>Joiner</h3>
-    <button id="applyOfferBtn">Apply Offer & Create Answer</button>
-
-    <label>Paste Offer</label>
-    <textarea id="offerIn"></textarea>
-
-    <label>Answer (copy)</label>
-    <textarea id="answerOut" readonly></textarea>
-  </div>
-</div>
-
-<div class="card" style="margin-top: 12px;">
-  <h3>Chat</h3>
-  <div id="log"></div>
-  <div class="row" style="margin-top: 10px;">
-    <input id="msg" placeholder="message…" style="flex:1">
-    <button id="sendBtn" disabled>Send</button>
-  </div>
-</div>
-
-<script>
+  <script>
   const $ = id => document.getElementById(id);
   const logEl = $("log");
-  const statusEl = $("status");
+  const statusEl = $("statusChat") || $("status");
+  const nameInput = $("name");
+  const callerSection = $("callerSection");
+  const joinerSection = $("joinerSection");
+  const chooseCallerBtn = $("chooseCaller");
+  const chooseJoinerBtn = $("chooseJoiner");
+  const noteToggle = $("noteToggle");
+  const howTo = $("howTo");
+  const chatControls = $("chatControls");
+  const setNameBtn = $("setNameBtn");
+  const callerHeader = $("callerHeader");
+  const joinerHeader = $("joinerHeader");
+  const attachInput = $("attachInput");
+  const attachBtn = $("attachBtn");
+  const attachInfo = $("attachInfo");
+  const debugToggle = $("debugToggle");
+  const debugModal = $("debugModal");
+  const debugContent = $("debugContent");
+  const debugClose = $("debugClose");
+  const ackNoteBtn = $("ackNoteBtn");
+  const disclaimer = $("disclaimer");
+  const NAME_KEY = "p2p-username";
+  const ACK_KEY = "p2p-security-ack";
 
-  function log(m) {
-    logEl.textContent += `[${new Date().toLocaleTimeString()}] ${m}\n`;
+  const firstNames = [
+    "Crimson","Ruby","Scarlet","Garnet","Ember","Brick","Cinder","Maroon","Sienna","Copper",
+    "Rust","Flare","Forge","Blaze","Ash","Coal","Char","Sable","Flint","Talon",
+    "Onyx","Vermilion","Cardinal","Carmine","Sear","Molten","Beryl","Iron","Sparks","Kindle"
+  ];
+  const lastNames = [
+    "Signal","Channel","Echo","Pulse","Relay","Circuit","Link","Wave","Beacon","Path",
+    "Route","Stream","Trace","Line","Cable","Fiber","Tunnel","Bridge","Port","Socket",
+    "Packet","Node","Hub","Mesh","Switch","Carrier","Span","Flow","Chord","Current"
+  ];
+
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const randomName = () => `${pick(firstNames)} ${pick(lastNames)}`;
+  const scrollToBottom = () => {
+    if (!logEl) return;
     logEl.scrollTop = logEl.scrollHeight;
+    requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+  };
+  const copyToClipboard = async text => {
+    try {
+      await navigator.clipboard.writeText(text);
+      log({ kind: "info", text: "Copied to clipboard" });
+    } catch (e) {
+      log({ kind: "info", text: "Could not copy to clipboard automatically" });
+    }
+  };
+
+  let pc = null;
+  let dc = null;
+  let localCandidates = [];
+  let role = null;
+  let localName = "You";
+  let peerName = "Peer";
+  let noteVisible = false;
+  let fileIdCounter = 1;
+  const pendingOutgoingFiles = {};
+  const incomingTransfers = {};
+  const outgoingTransfers = {};
+  let memorySavedName = null;
+  let pendingAttachment = null;
+  let logClearedForConnect = false;
+  let hasAcked = false;
+  let showCallerSection = true;
+  let showJoinerSection = true;
+
+  function loadSavedName() {
+    try {
+      const v = localStorage.getItem(NAME_KEY);
+      if (v !== null) return v;
+    } catch {}
+    try {
+      const v = sessionStorage.getItem(NAME_KEY);
+      if (v !== null) return v;
+    } catch {}
+    if (memorySavedName !== null) return memorySavedName;
+    return null;
   }
-  function setStatus(s) { statusEl.textContent = s; }
+  function loadAck() {
+    try {
+      const v = localStorage.getItem(ACK_KEY);
+      if (v === "1") return true;
+    } catch {}
+    return false;
+  }
+
+  function buildPendingFileNode({ fileName = "file", mime = "file", size = 0 }) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "8px";
+    wrap.style.width = "100%";
+    const label = document.createElement("span");
+    const sizeMb = (size / (1024 * 1024)).toFixed(2);
+    label.textContent = `${fileName} (${mime}) • ${sizeMb} MB (waiting for accept)`;
+    wrap.appendChild(label);
+    return wrap;
+  }
+
+  function persistName(v) {
+    const val = (v || "").trim();
+    memorySavedName = val;
+    try { localStorage.setItem(NAME_KEY, val); } catch {}
+    try { sessionStorage.setItem(NAME_KEY, val); } catch {}
+  }
+
+  function applyName({ announce = false, save = false, allowRandom = true } = {}) {
+    const before = localName;
+    let next = (nameInput.value || "").trim();
+    let generatedRandom = false;
+    if (!next && save) {
+      persistName(""); // save blank as blank
+    }
+    if (!next && (allowRandom || save)) {
+      next = randomName();
+      nameInput.value = next;
+      generatedRandom = true;
+    }
+    localName = next;
+    if (save && !generatedRandom && localName) persistName(localName);
+    if (announce && dc && dc.readyState === "open" && localName !== before) {
+      dc.send(JSON.stringify({ t: "name-change", from: before, to: localName }));
+      log({ kind: "info", text: `You changed name: ${before} → ${localName}` });
+      renameLogBadges("self", localName);
+    }
+  }
+  function updateLocalName() {
+    applyName({ announce: false, save: false });
+  }
+  {
+    const saved = loadSavedName();
+    if (saved !== null) {
+      nameInput.value = saved;
+    } else {
+      nameInput.value = randomName();
+    }
+  }
+  applyName({ announce: false, save: false });
+  if (setNameBtn) {
+    setNameBtn.addEventListener("click", () => {
+      applyName({ announce: true, save: true, allowRandom: true });
+    });
+  }
+
+  function log({ kind = "info", text = "", name = "", node = null } = {}) {
+    const line = document.createElement("div");
+    line.className = `log-line ${kind}`;
+
+    const head = document.createElement("div");
+    head.className = "log-head";
+
+    const time = document.createElement("span");
+    time.className = "log-time";
+    time.textContent = new Date().toLocaleTimeString();
+
+    const badge = document.createElement("span");
+    badge.className = "log-badge";
+
+    if (kind === "self") badge.textContent = name || localName;
+    else if (kind === "peer") badge.textContent = name || peerName;
+
+    const bodyEl = document.createElement("span");
+    bodyEl.className = "log-body";
+    if (node) bodyEl.appendChild(node);
+    else bodyEl.textContent = text;
+
+    if (!badge.textContent) badge.style.display = "none";
+
+    head.append(time, badge);
+    line.append(head, bodyEl);
+    logEl.appendChild(line);
+    scrollToBottom();
+    return line;
+  }
+  function renameLogBadges(kind, newName) {
+    if (!newName) return;
+    logEl.querySelectorAll(`.log-line.${kind} .log-badge`).forEach(b => {
+      b.textContent = newName;
+    });
+  }
+
+  function replaceWithMessage(el, text) {
+    if (!el) return;
+    el.innerHTML = "";
+    const msg = document.createElement("span");
+    msg.style.color = "var(--muted)";
+    msg.textContent = text;
+    el.appendChild(msg);
+  }
+
+  const base64FromUint8 = u8 => {
+    let s = "";
+    for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    return btoa(s);
+  };
+  const uint8FromBase64 = b64 => {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+
+  const guessMime = file => {
+    if (file && file.type) return file.type;
+    const name = (file && file.name) || "";
+    const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+    const map = {
+      mp3: "audio/mpeg",
+      m4a: "audio/mp4",
+      wav: "audio/wav",
+      ogg: "audio/ogg",
+      flac: "audio/flac",
+      mp4: "video/mp4",
+      webm: "video/webm",
+      mov: "video/quicktime",
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      bmp: "image/bmp",
+      webp: "image/webp"
+    };
+    return map[ext] || "application/octet-stream";
+  };
+  const isMediaType = (mime = "", name = "") => {
+    if (mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/")) return true;
+    const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+    return ["png","jpg","jpeg","gif","bmp","webp","mp3","m4a","wav","ogg","flac","mp4","webm","mov"].includes(ext);
+  };
+  const extractIps = arr => {
+    if (!Array.isArray(arr)) return [];
+    const ips = new Set();
+    arr.forEach(c => {
+      const cand = c?.candidate || "";
+      const match = cand.match(/\\b(?:(?:[0-9]{1,3}\\.){3}[0-9]{1,3})\\b/);
+      if (match) ips.add(match[0]);
+    });
+    return Array.from(ips);
+  };
+
+  function buildFileNode({ fileName = "file", mime = "file", data = "", revokeCb = null }) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "8px";
+    wrap.style.width = "100%";
+    wrap.style.position = "relative";
+
+    const link = document.createElement("a");
+    link.href = data;
+    link.download = fileName;
+    link.textContent = "Download";
+    link.style.padding = "6px 10px";
+    link.style.border = "1.5px solid var(--border)";
+    link.style.background = "linear-gradient(180deg, rgba(255,255,255,0.12), rgba(34,22,23,0.9))";
+    link.style.color = "var(--ink)";
+    link.style.borderRadius = "10px";
+    link.style.boxShadow = "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 var(--highlight), inset 0 -1px 3px rgba(0,0,0,0.4)";
+    link.style.textDecoration = "none";
+    link.style.fontSize = "12px";
+    link.style.whiteSpace = "nowrap";
+    link.target = "_blank";
+    wrap.appendChild(link);
+
+    const label = document.createElement("span");
+    label.textContent = `${fileName} (${mime})`;
+    wrap.appendChild(label);
+
+    const spacer = document.createElement("span");
+    spacer.style.flex = "1";
+    wrap.appendChild(spacer);
+
+    if (mime.startsWith("image/") && data.startsWith("data:")) {
+      const img = document.createElement("img");
+      img.src = data;
+      img.alt = fileName;
+      img.className = "thumb";
+      wrap.appendChild(img);
+    }
+    if (revokeCb) {
+      const del = document.createElement("button");
+      del.textContent = "Delete";
+      del.style.whiteSpace = "nowrap";
+      del.style.position = "static";
+      del.style.padding = "4px 8px";
+      del.style.fontSize = "11px";
+      del.style.borderRadius = "8px";
+      del.style.border = "1.5px solid var(--border)";
+      del.style.background = "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(26,18,20,0.9))";
+      del.onclick = () => {
+        revokeCb();
+        link.removeAttribute("href");
+        link.textContent = "[deleted]";
+        del.disabled = true;
+        del.textContent = "Deleted";
+        del.style.display = "none";
+        const line = del.closest(".log-line");
+        if (line) line.classList.add("expired");
+      };
+      // move to header row when available
+      setTimeout(() => {
+        const head = wrap.closest(".log-line")?.querySelector(".log-head");
+        if (head) head.appendChild(del);
+        else wrap.appendChild(del);
+      });
+    }
+    return wrap;
+  }
+
+  function buildMediaPreview({ fileName = "file", mime = "file", url = "", revokeCb = null }) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "8px";
+    wrap.style.width = "100%";
+    wrap.style.alignSelf = "flex-start";
+    wrap.style.position = "relative";
+
+    let media = null;
+    const showTitle = mime.startsWith("audio/");
+    if (showTitle) {
+      const title = document.createElement("span");
+      title.textContent = fileName ? `${fileName} (${mime})` : mime;
+      title.style.alignSelf = "flex-start";
+      wrap.appendChild(title);
+    }
+    if (mime.startsWith("image/")) {
+      media = document.createElement("img");
+      media.src = url;
+      media.alt = fileName;
+      media.style.display = "block";
+      media.style.alignSelf = "flex-start";
+      media.style.maxWidth = "320px";
+      media.style.maxHeight = "260px";
+      media.style.borderRadius = "10px";
+      media.style.boxShadow = "0 8px 18px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.25)";
+      media.style.objectFit = "contain";
+      media.addEventListener("load", scrollToBottom);
+    } else if (mime.startsWith("audio/")) {
+      media = document.createElement("audio");
+      media.controls = true;
+      media.src = url;
+      media.style.width = "100%";
+      media.addEventListener("loadedmetadata", scrollToBottom);
+    } else if (mime.startsWith("video/")) {
+      media = document.createElement("video");
+      media.controls = true;
+      media.src = url;
+      media.style.display = "block";
+      media.style.alignSelf = "flex-start";
+      media.style.width = "320px";
+      media.style.maxHeight = "240px";
+      media.style.borderRadius = "10px";
+      media.style.boxShadow = "0 8px 18px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.25)";
+      media.style.objectFit = "contain";
+      media.addEventListener("loadedmetadata", scrollToBottom);
+    }
+    if (media) wrap.appendChild(media);
+
+    if (revokeCb) {
+      const del = document.createElement("button");
+      del.textContent = "Delete";
+      del.style.position = "static";
+      del.style.whiteSpace = "nowrap";
+      del.style.padding = "4px 8px";
+      del.style.fontSize = "11px";
+      del.style.borderRadius = "8px";
+      del.style.border = "1.5px solid var(--border)";
+      del.style.background = "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(26,18,20,0.9))";
+      del.onclick = () => {
+        revokeCb();
+        if (media) media.removeAttribute("src");
+        del.disabled = true;
+        del.textContent = "Deleted";
+        del.style.display = "none";
+        const line = del.closest(".log-line");
+        if (line) line.classList.add("expired");
+      };
+      setTimeout(() => {
+        const head = wrap.closest(".log-line")?.querySelector(".log-head");
+        if (head) head.appendChild(del);
+        else wrap.appendChild(del);
+      });
+    }
+    return wrap;
+  }
+
+  function buildFileRequestNode({ from = "Peer", fileName = "file", mime = "", size = 0, id }) {
+    const wrap = document.createElement("span");
+    const kb = Math.round(size / 102.4) / 10;
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "8px";
+    const label = document.createElement("span");
+    label.textContent = `${from} wants to send ${fileName} (${mime || "file"}, ${kb} KB) `;
+    const btn = document.createElement("button");
+    btn.textContent = "Accept";
+    btn.onclick = () => {
+      if (!dc || dc.readyState !== "open") return;
+      dc.send(JSON.stringify({ t: "file-accept", id }));
+      const line = wrap.closest(".log-line");
+      if (line) line.remove();
+    };
+    const decline = document.createElement("button");
+    decline.textContent = "Decline";
+    decline.onclick = () => {
+      if (!dc || dc.readyState !== "open") return;
+      dc.send(JSON.stringify({ t: "file-decline", id }));
+      replaceWithMessage(wrap, `You declined ${fileName}`);
+    };
+    const spacer = document.createElement("span");
+    spacer.style.flex = "1";
+    wrap.append(label, spacer, btn, decline);
+    return wrap;
+  }
+
+  function buildProgressNode({ label = "", id, onCancel = null, showDetails = false }) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "6px";
+
+    const title = document.createElement("span");
+    title.textContent = label;
+    wrap.appendChild(title);
+
+    const row = document.createElement("div");
+    row.className = "progress-row";
+
+    const barWrap = document.createElement("div");
+    barWrap.className = "bar-wrap";
+    barWrap.style.width = "100%";
+    barWrap.style.height = "12px";
+    barWrap.style.background = "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(30,20,21,0.9))";
+    barWrap.style.borderRadius = "999px";
+    barWrap.style.border = "1px solid var(--border)";
+    barWrap.style.boxShadow = "inset 0 2px 4px rgba(0,0,0,0.45), 0 4px 10px rgba(0,0,0,0.25)";
+    const bar = document.createElement("div");
+    bar.style.height = "100%";
+    bar.style.width = "0%";
+    bar.style.borderRadius = "999px";
+    bar.style.background = "linear-gradient(90deg, #ff6b6b, #ff3b3b)";
+    bar.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -1px 3px rgba(0,0,0,0.35)";
+    barWrap.appendChild(bar);
+
+    const pct = document.createElement("span");
+    pct.style.fontSize = "12px";
+    pct.style.color = "var(--muted)";
+    pct.textContent = "0%";
+
+    row.append(barWrap, pct);
+
+    const details = document.createElement("span");
+    details.style.fontSize = "12px";
+    details.style.color = "var(--muted)";
+    details.textContent = "";
+
+    if (onCancel) {
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.style.whiteSpace = "nowrap";
+      cancel.onclick = () => onCancel({ wrap, bar, pct, cancel, barWrap, row });
+      row.appendChild(cancel);
+    }
+
+    wrap.append(row);
+    if (showDetails) wrap.appendChild(details);
+
+    return { wrap, bar, pct, details, barWrap, row };
+  }
+  function setStatus(s) {
+    if (s === "connected" && !logClearedForConnect) {
+      logEl.innerHTML = "";
+      logClearedForConnect = true;
+    } else if (s !== "connected") {
+      logClearedForConnect = false;
+    }
+    statusEl.textContent = s;
+    statusEl.classList.toggle("connected", s === "connected");
+    statusEl.classList.toggle("connecting", s === "connecting");
+    const isConnected = s === "connected";
+    chatControls.classList.toggle("hide", !isConnected);
+    if (attachBtn) attachBtn.disabled = !isConnected;
+    if (attachInput) attachInput.disabled = !isConnected;
+    if (!isConnected && attachInfo) {
+      attachInfo.classList.add("hide");
+      attachInfo.textContent = "";
+      $("msg").classList.remove("hide");
+      $("msg").readOnly = false;
+      pendingAttachment = null;
+    }
+    if (isConnected) {
+      showCallerSection = false;
+      showJoinerSection = false;
+    } else {
+      if (role === "caller") showCallerSection = true;
+      if (role === "joiner") showJoinerSection = true;
+    }
+    updateRoleUI();
+    const shouldCollapse = isConnected;
+    callerSection.classList.toggle("collapsed", shouldCollapse);
+    joinerSection.classList.toggle("collapsed", shouldCollapse);
+  }
 
   /* ---------- Compression helpers ---------- */
   function encodeBundle(obj) {
@@ -116,20 +1150,170 @@
     ]
   };
 
-  let pc = null;
-  let dc = null;
-  let localCandidates = [];
-  let role = null;
-
-  function reset() {
+  function reset({ preserveRole = false } = {}) {
     if (dc) dc.close();
     if (pc) pc.close();
     pc = dc = null;
     localCandidates = [];
-    role = null;
+    if (!preserveRole) role = null;
+    peerName = "Peer";
+    prevLocalName = localName;
+    updateLocalName();
+    logClearedForConnect = false;
     $("sendBtn").disabled = true;
     $("applyAnswerBtn").disabled = true;
     setStatus("idle");
+    updateRoleUI();
+  }
+
+  function updateRoleUI() {
+    const showCaller = role === "caller" && showCallerSection;
+    const showJoiner = role === "joiner" && showJoinerSection;
+    callerSection.classList.toggle("hide", !showCaller);
+    joinerSection.classList.toggle("hide", !showJoiner);
+    chooseCallerBtn.classList.toggle("is-active", role === "caller" && showCallerSection);
+    chooseJoinerBtn.classList.toggle("is-active", role === "joiner" && showJoinerSection);
+  }
+
+  function updateNote() {
+    howTo.classList.toggle("hide", !noteVisible);
+    noteToggle.textContent = noteVisible ? "Hide instructions" : "Show instructions";
+  }
+  function updateDisclaimer() {
+    if (!disclaimer) return;
+    disclaimer.classList.toggle("hide", hasAcked);
+    if (ackNoteBtn) ackNoteBtn.classList.toggle("hide", hasAcked);
+  }
+
+  function fillDebug() {
+    if (!debugContent) return;
+    const status = statusEl.textContent || "unknown";
+    const ips = extractIps(localCandidates);
+
+    const summaryGrid = document.createElement("div");
+    summaryGrid.className = "debug-grid";
+    const summaryBox = document.createElement("div");
+    summaryBox.className = "debug-box";
+    const head = document.createElement("h4");
+    head.textContent = "Session";
+    summaryBox.appendChild(head);
+    const addRow = (label, value) => {
+      const line = document.createElement("div");
+      line.className = "rowline";
+      line.textContent = `${label}: ${value}`;
+      summaryBox.appendChild(line);
+    };
+    addRow("Status", status);
+    addRow("Role", role || "unset");
+    addRow("Local name", localName);
+    addRow("Peer name", peerName);
+    addRow("Local candidates", localCandidates.length);
+    if (ips.length) addRow("IP hints", ips.join(", "));
+    summaryGrid.appendChild(summaryBox);
+
+    const candBox = document.createElement("div");
+    candBox.className = "debug-box";
+    const candHead = document.createElement("h4");
+    candHead.textContent = "Local candidates (raw)";
+    candBox.appendChild(candHead);
+    const candPre = document.createElement("pre");
+    candPre.textContent = JSON.stringify(localCandidates, null, 2);
+    candBox.appendChild(candPre);
+    summaryGrid.appendChild(candBox);
+
+    const decodeVal = val => {
+      if (!val) return "<empty>";
+      try { return JSON.stringify(decodeBundle(val), null, 2); }
+      catch { return "<invalid>"; }
+    };
+    const grid = document.createElement("div");
+    grid.className = "debug-grid";
+    const addBox = (title, val) => {
+      const box = document.createElement("div");
+      box.className = "debug-box";
+      const h = document.createElement("h4");
+      h.textContent = title;
+      box.appendChild(h);
+      const pre = document.createElement("pre");
+      pre.textContent = decodeVal(val);
+      box.appendChild(pre);
+      grid.appendChild(box);
+    };
+    addBox("Offer (copy)", $("offerOut")?.value);
+    addBox("Offer (pasted)", $("offerIn")?.value);
+    addBox("Answer (copy)", $("answerOut")?.value);
+    addBox("Answer (pasted)", $("answerIn")?.value);
+
+    debugContent.innerHTML = "";
+    debugContent.appendChild(summaryGrid);
+    debugContent.appendChild(grid);
+  }
+
+  function showDebug(open) {
+    if (!debugModal) return;
+    if (open) fillDebug();
+    debugModal.classList.toggle("show", !!open);
+  }
+
+  function setRole(nextRole) {
+    role = nextRole;
+    showCallerSection = nextRole === "caller";
+    showJoinerSection = nextRole === "joiner";
+    reset({ preserveRole: true });
+    $("offerOut").value = "";
+    $("answerIn").value = "";
+    $("offerIn").value = "";
+    $("answerOut").value = "";
+    updateRoleUI();
+  }
+
+  if (chooseCallerBtn) chooseCallerBtn.onclick = () => {
+    if (role === "caller") {
+      showCallerSection = !showCallerSection;
+      updateRoleUI();
+    } else {
+      setRole("caller");
+    }
+  };
+  if (chooseJoinerBtn) chooseJoinerBtn.onclick = () => {
+    if (role === "joiner") {
+      showJoinerSection = !showJoinerSection;
+      updateRoleUI();
+    } else {
+      setRole("joiner");
+    }
+  };
+  hasAcked = loadAck();
+  noteVisible = false;
+  updateRoleUI();
+  updateDisclaimer();
+  updateNote();
+  if (debugToggle) debugToggle.onclick = () => showDebug(true);
+  if (debugClose) debugClose.onclick = () => showDebug(false);
+  if (debugModal) {
+    debugModal.addEventListener("click", e => {
+      if (e.target === debugModal) showDebug(false);
+    });
+  }
+  [["offerOut"],["answerOut"]].forEach(([id])=>{
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("click", () => {
+      if (!el.value) return;
+      copyToClipboard(el.value);
+    });
+  });
+
+  noteToggle.onclick = () => {
+    noteVisible = !noteVisible;
+    updateNote();
+  };
+  if (ackNoteBtn) {
+    ackNoteBtn.onclick = () => {
+      hasAcked = true;
+      try { localStorage.setItem(ACK_KEY, "1"); } catch {}
+      updateDisclaimer();
+    };
   }
 
   function ensurePC() {
@@ -154,9 +1338,238 @@
   }
 
   function wireDC() {
-    dc.onopen = () => log("DataChannel open");
-    dc.onmessage = e => log("peer: " + e.data);
-    dc.onclose = () => log("DataChannel closed");
+    dc.onopen = () => {
+      if (!logClearedForConnect) {
+        logEl.innerHTML = "";
+        logClearedForConnect = true;
+      }
+      updateLocalName();
+      dc.send(JSON.stringify({ t: "name", v: localName }));
+    };
+    dc.onmessage = e => handleMessage(e.data);
+    dc.onclose = () => log({ kind: "info", text: "DataChannel closed" });
+  }
+
+  function handleMessage(data) {
+    try {
+      const msg = JSON.parse(data);
+      if (msg.t === "name") {
+        const incomingName = (msg.v || "Peer").trim() || "Peer";
+        if (incomingName === localName) {
+          log({ kind: "info", text: "Name conflict detected. Disconnecting." });
+          try { dc.send(JSON.stringify({ t: "name-conflict" })); } catch {}
+          reset();
+          return;
+        }
+        peerName = incomingName;
+        log({ kind: "info", text: `Connected to ${peerName}` });
+        renameLogBadges("peer", peerName);
+        return;
+      }
+      if (msg.t === "name-change") {
+        const from = (msg.from || peerName || "Peer").trim() || "Peer";
+        const to = (msg.to || "Peer").trim() || "Peer";
+        if (to === localName) {
+          log({ kind: "info", text: "Name conflict detected. Disconnecting." });
+          try { dc.send(JSON.stringify({ t: "name-conflict" })); } catch {}
+          reset();
+          return;
+        }
+        peerName = to;
+        log({ kind: "info", text: `${from} is now ${to}` });
+        renameLogBadges("peer", peerName);
+        return;
+      }
+      if (msg.t === "name-conflict") {
+        log({ kind: "info", text: "Disconnected: peer has the same name." });
+        reset();
+        return;
+      }
+      if (msg.t === "chat") {
+        peerName = (msg.n || peerName).trim() || peerName;
+        log({ kind: "peer", text: msg.v || "", name: peerName });
+        return;
+      }
+      if (msg.t === "file-request") {
+        const node = buildFileRequestNode({
+          from: msg.name || peerName,
+          fileName: msg.fileName,
+          mime: msg.mime,
+          size: msg.size,
+          id: msg.id
+        });
+        log({ kind: "peer", name: msg.name || peerName, node });
+        return;
+      }
+      if (msg.t === "file-send-start") {
+        const mimeVal = msg.mime || guessMime({ name: msg.fileName });
+        const prog = buildProgressNode({
+          label: `Receiving ${msg.fileName} (${mimeVal})`,
+          id: msg.id,
+          onCancel: () => {
+            dc.send(JSON.stringify({ t: "file-cancel", id: msg.id }));
+            const t = incomingTransfers[msg.id];
+            if (t) {
+              const cancelMsg = document.createElement("span");
+              cancelMsg.textContent = `Receive cancelled for ${t.fileName}`;
+              if (t.progNode && t.progNode.parentElement) t.progNode.parentElement.replaceChild(cancelMsg, t.progNode);
+              delete incomingTransfers[msg.id];
+            }
+          },
+          showDetails: true
+        });
+        log({ kind: "peer", name: msg.name || peerName, node: prog.wrap });
+        incomingTransfers[msg.id] = {
+          name: msg.name || peerName,
+          fileName: msg.fileName,
+          mime: mimeVal,
+          size: msg.size,
+          expectedChunks: msg.chunks,
+          receivedChunks: 0,
+          bytesReceived: 0,
+          buffers: [],
+          bar: prog.bar,
+          pct: prog.pct,
+          details: prog.details,
+          progNode: prog.wrap,
+          lastProgressSent: 0,
+          started: Date.now()
+        };
+        return;
+      }
+      if (msg.t === "file-chunk") {
+        const t = incomingTransfers[msg.id];
+        if (!t) return;
+        const data = uint8FromBase64(msg.data);
+        t.buffers.push(data);
+        t.receivedChunks += 1;
+        t.bytesReceived = (t.bytesReceived || 0) + data.byteLength;
+        const doneBySize = t.size ? t.bytesReceived / t.size : t.receivedChunks / t.expectedChunks;
+        const done = Math.min(doneBySize || 0, 1);
+        t.bar.style.width = `${Math.floor(done * 100)}%`;
+        t.pct.textContent = `${Math.floor(done * 100)}%`;
+        if (t.details) {
+          const bytesReceived = t.bytesReceived;
+          const totalBytes = t.size || t.bytesReceived;
+          const mb = bytesReceived / (1024 * 1024);
+          const totalMb = totalBytes / (1024 * 1024);
+          const elapsed = Math.max((Date.now() - (t.started || Date.now())) / 1000, 0.001);
+          const rateMb = mb / elapsed;
+          const rateMbit = rateMb * 8;
+          const remainingMb = Math.max(totalMb - mb, 0);
+          const eta = rateMbit > 0 ? (remainingMb * 8) / rateMbit : 0;
+          t.details.textContent = `${mb.toFixed(2)} / ${totalMb.toFixed(2)} MB • ${rateMbit.toFixed(2)} Mb/s • ETA ${eta.toFixed(1)}s`;
+        }
+        const now = Date.now();
+        if (dc && dc.readyState === "open" && (now - t.lastProgressSent >= 500 || t.receivedChunks >= t.expectedChunks)) {
+          dc.send(JSON.stringify({ t: "file-progress", id: msg.id, pct: Math.floor(done * 100) }));
+          t.lastProgressSent = now;
+      }
+      if (t.receivedChunks >= t.expectedChunks) {
+        const blob = new Blob(t.buffers, { type: t.mime });
+        const url = URL.createObjectURL(blob);
+          const isMedia = isMediaType(t.mime || "", t.fileName);
+          const node = isMedia
+            ? buildMediaPreview({
+                fileName: t.fileName,
+                mime: t.mime,
+                url,
+                revokeCb: () => URL.revokeObjectURL(url)
+              })
+            : buildFileNode({
+                fileName: t.fileName,
+                mime: t.mime,
+                data: url,
+                revokeCb: () => URL.revokeObjectURL(url)
+              });
+          if (t.progNode && t.progNode.parentElement) t.progNode.parentElement.replaceChild(node, t.progNode);
+          else log({ kind: "peer", name: t.name, node });
+          if (dc && dc.readyState === "open") {
+            dc.send(JSON.stringify({ t: "file-received", id: msg.id, fileName: t.fileName, mime: t.mime }));
+          }
+          delete incomingTransfers[msg.id];
+        }
+        return;
+      }
+      if (msg.t === "file-accept") {
+        const pending = pendingOutgoingFiles[msg.id];
+        if (pending && dc && dc.readyState === "open") {
+          sendFileChunks(msg.id, pending);
+        }
+        return;
+      }
+      if (msg.t === "file-decline") {
+        if (pendingOutgoingFiles[msg.id]) {
+          const pending = pendingOutgoingFiles[msg.id];
+          if (pending.previewNode) replaceWithMessage(pending.previewNode, `Peer declined ${pending.file?.name || "file"}`);
+          delete pendingOutgoingFiles[msg.id];
+          log({ kind: "info", text: "Peer declined the file transfer" });
+        }
+        return;
+      }
+      if (msg.t === "file-cancel") {
+        if (incomingTransfers[msg.id]) {
+          const t = incomingTransfers[msg.id];
+          if (t.progNode && t.progNode.parentElement) {
+            replaceWithMessage(t.progNode, `Receive cancelled for ${t.fileName}`);
+          }
+          delete incomingTransfers[msg.id];
+        }
+        if (outgoingTransfers[msg.id]) {
+          const t = outgoingTransfers[msg.id];
+          if (t.wrap && t.wrap.parentElement) {
+            replaceWithMessage(t.wrap, `Send cancelled for ${pendingOutgoingFiles[msg.id]?.file?.name || "file"}`);
+          }
+          t.cancelled = true;
+          delete outgoingTransfers[msg.id];
+        }
+        return;
+      }
+      if (msg.t === "file-progress") {
+        const out = outgoingTransfers[msg.id];
+        if (out) {
+          out.bar.style.width = `${msg.pct}%`;
+          out.pct.textContent = `${msg.pct}%`;
+          if (out.details) {
+            const totalMb = out.size / (1024 * 1024);
+            const doneMb = (totalMb * msg.pct) / 100;
+            const elapsed = Math.max((Date.now() - out.started) / 1000, 0.001);
+            const rateMb = doneMb / elapsed;
+            const rateMbit = rateMb * 8;
+            const remainingMb = Math.max(totalMb - doneMb, 0);
+            const eta = rateMbit > 0 ? (remainingMb * 8) / rateMbit : 0;
+            out.details.textContent = `${doneMb.toFixed(2)} / ${totalMb.toFixed(2)} MB • ${rateMbit.toFixed(2)} Mb/s • ETA ${eta.toFixed(1)}s`;
+          }
+        }
+        return;
+      }
+      if (msg.t === "file-received") {
+        const out = outgoingTransfers[msg.id];
+        if (out) {
+          const isMedia = out.isMedia || isMediaType(msg.mime || "", msg.fileName || "");
+          if (isMedia && out.wrap && out.wrap.parentElement) {
+            const line = out.wrap.closest(".log-line");
+            if (line) line.remove();
+            else out.wrap.remove();
+            if (out.previewNode) out.previewNode.style.opacity = "1";
+          } else {
+            replaceWithMessage(out.wrap, `Sent ${msg.fileName || "file"}`);
+          }
+          delete outgoingTransfers[msg.id];
+        }
+        return;
+      }
+      if (msg.t === "file-decline") {
+        if (pendingOutgoingFiles[msg.id]) {
+          delete pendingOutgoingFiles[msg.id];
+          log({ kind: "info", text: "Peer declined the file transfer" });
+        }
+        return;
+      }
+    } catch (err) {
+      // Fallback for non-JSON payloads
+    }
+    log({ kind: "peer", text: data, name: peerName });
   }
 
 function waitIce(pc) {
@@ -187,10 +1600,24 @@ function waitIce(pc) {
     return obj;
   }
 
+  function waitForBuffer(dc, threshold = 256000) {
+    return new Promise(resolve => {
+      if (!dc) return resolve();
+      const check = () => {
+        if (!dc || dc.readyState !== "open" || dc.bufferedAmount <= threshold) {
+          dc?.removeEventListener("bufferedamountlow", check);
+          resolve();
+        }
+      };
+      dc.addEventListener("bufferedamountlow", check);
+      setTimeout(check, 100);
+    });
+  }
+
   /* ---------- Caller ---------- */
-  $("createOfferBtn").onclick = async () => {
-    reset();
-    role = "caller";
+  async function createOfferFlow() {
+    if (role !== "caller") { setRole("caller"); }
+    reset({ preserveRole: true });
     setStatus("creating-offer");
 
     const pc = ensurePC();
@@ -200,29 +1627,47 @@ function waitIce(pc) {
     await pc.setLocalDescription(await pc.createOffer());
     await waitIce(pc);
 
-    $("offerOut").value = makeBundle(pc.localDescription);
+    const offerBundle = makeBundle(pc.localDescription);
+    $("offerOut").value = offerBundle;
+    copyToClipboard(offerBundle);
     $("applyAnswerBtn").disabled = false;
     setStatus("offer-ready");
-    log("Offer ready");
-  };
+    log({ kind: "info", text: "Offer ready" });
+  }
 
-  $("applyAnswerBtn").onclick = async () => {
+  async function applyAnswerFlow() {
     if (role !== "caller") return;
-    const bundle = parseBundle($("answerIn").value);
+    const bundleText = $("answerIn").value;
+    let bundle;
+    try {
+      bundle = parseBundle(bundleText);
+    } catch (e) {
+      return;
+    }
     await pc.setRemoteDescription(bundle.description);
     for (const c of bundle.candidates) {
       try { await pc.addIceCandidate(c); } catch {}
     }
     setStatus("connecting");
-  };
+  }
+
+  $("createOfferBtn").onclick = () => { createOfferFlow(); };
+  $("applyAnswerBtn").onclick = () => { applyAnswerFlow(); };
 
   /* ---------- Joiner ---------- */
-  $("applyOfferBtn").onclick = async () => {
-    reset();
-    role = "joiner";
+  async function applyOfferFlow() {
+    if (role !== "joiner") { setRole("joiner"); }
+    reset({ preserveRole: true });
     setStatus("applying-offer");
 
-    const bundle = parseBundle($("offerIn").value);
+    const bundleText = $("offerIn").value;
+    let bundle;
+    try {
+      bundle = parseBundle(bundleText);
+    } catch (e) {
+      return;
+    }
+
     const pc = ensurePC();
 
     await pc.setRemoteDescription(bundle.description);
@@ -233,24 +1678,198 @@ function waitIce(pc) {
     await pc.setLocalDescription(await pc.createAnswer());
     await waitIce(pc);
 
-    $("answerOut").value = makeBundle(pc.localDescription);
+    const answerBundle = makeBundle(pc.localDescription);
+    $("answerOut").value = answerBundle;
+    copyToClipboard(answerBundle);
     setStatus("answer-ready");
-    log("Answer ready");
-  };
+    log({ kind: "info", text: "Answer ready" });
+  }
+
+  $("applyOfferBtn").onclick = () => { applyOfferFlow(); };
 
   /* ---------- Chat ---------- */
   $("sendBtn").onclick = () => {
     if (!dc || dc.readyState !== "open") return;
-    dc.send($("msg").value);
-    log("me: " + $("msg").value);
+    const text = $("msg").value.trim();
+    if (pendingAttachment) {
+      const f = pendingAttachment;
+      const id = `file-${Date.now()}-${fileIdCounter++}`;
+      const mime = guessMime(f);
+      const url = URL.createObjectURL(f);
+      const isMedia = isMediaType(mime, f.name);
+      if (isMedia) {
+        const previewNode = buildMediaPreview({ fileName: f.name, mime, url, revokeCb: () => URL.revokeObjectURL(url) });
+        previewNode.style.opacity = "0.6";
+        log({ kind: "self", name: localName, node: previewNode });
+        pendingOutgoingFiles[id] = { file: f, mime, previewNode, replaceWithProgress: false };
+        sendFileChunks(id, pendingOutgoingFiles[id]);
+      } else {
+        const pendingNode = buildPendingFileNode({ fileName: f.name, mime, size: f.size });
+        log({ kind: "self", name: localName, node: pendingNode });
+        pendingOutgoingFiles[id] = { file: f, mime, previewNode: pendingNode };
+        dc.send(JSON.stringify({
+          t: "file-request",
+          id,
+          name: localName,
+          fileName: f.name,
+          mime,
+          size: f.size
+        }));
+      }
+      pendingAttachment = null;
+      $("msg").value = "";
+      $("msg").readOnly = false;
+      $("msg").placeholder = "message…";
+      if (attachInfo) {
+        attachInfo.classList.add("hide");
+        attachInfo.textContent = "";
+      }
+      $("msg").classList.remove("hide");
+      return;
+    }
+    if (!text) return;
+    updateLocalName();
+    dc.send(JSON.stringify({ t: "chat", v: text, n: localName }));
+    log({ kind: "self", text, name: localName });
     $("msg").value = "";
   };
 
-  log("Flow:");
-  log("1) Caller: Create Offer → copy");
-  log("2) Joiner: Paste Offer → Create Answer → copy");
-  log("3) Caller: Paste Answer → connect");
+  if (attachBtn && attachInput) {
+    attachBtn.onclick = () => attachInput.click();
+    attachInput.onchange = () => {
+      const f = attachInput.files && attachInput.files[0];
+      if (!f) return;
+      pendingAttachment = f;
+      const sizeMb = (f.size / (1024 * 1024)).toFixed(2);
+      $("msg").value = "";
+      $("msg").classList.add("hide");
+      $("msg").readOnly = true;
+      $("msg").placeholder = "Ready to send attachment";
+      if (attachInfo) {
+        attachInfo.textContent = `${f.name} • ${sizeMb} MB • ${f.type || guessMime(f)}`;
+        attachInfo.classList.remove("hide");
+      }
+      attachInput.value = "";
+    };
+  }
+
+  $("msg").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      $("sendBtn").click();
+    }
+  });
+
+  const headerToggle = (headerEl, sectionEl) => {
+    if (!headerEl || !sectionEl) return;
+    headerEl.style.cursor = "pointer";
+    headerEl.addEventListener("click", () => {
+      const isConnected = statusEl.classList.contains("connected");
+      if (!isConnected) {
+        sectionEl.classList.remove("collapsed");
+        return;
+      }
+      sectionEl.classList.toggle("collapsed");
+    });
+  };
+  headerToggle(callerHeader, callerSection);
+  headerToggle(joinerHeader, joinerSection);
+
+  const answerIn = $("answerIn");
+  if (answerIn) {
+    answerIn.addEventListener("paste", () => {
+      setTimeout(() => applyAnswerFlow(), 0);
+    });
+  }
+
+  const offerIn = $("offerIn");
+  if (offerIn) {
+    offerIn.addEventListener("paste", () => {
+      setTimeout(() => applyOfferFlow(), 0);
+    });
+  }
+
+  const CHUNK_SIZE = 64000;
+  async function sendFileChunks(id, pending) {
+    const file = pending.file;
+    const isMedia = isMediaType(pending.mime || "", file.name);
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+    const MAX_BUFFER = 512000;
+    if (dc) dc.bufferedAmountLowThreshold = MAX_BUFFER / 2;
+    const prog = buildProgressNode({
+      label: `Sending ${file.name} (${pending.mime})`,
+      id,
+      onCancel: () => {
+        if (dc && dc.readyState === "open") {
+          dc.send(JSON.stringify({ t: "file-cancel", id }));
+        }
+        if (outgoingTransfers[id] && outgoingTransfers[id].wrap) {
+          replaceWithMessage(outgoingTransfers[id].wrap, `Send cancelled for ${file.name}`);
+          outgoingTransfers[id].cancelled = true;
+        }
+      },
+      showDetails: true
+    });
+    if (pending.previewNode && pending.replaceWithProgress !== false && pending.previewNode.parentElement) {
+      pending.previewNode.parentElement.replaceChild(prog.wrap, pending.previewNode);
+    } else {
+      log({ kind: "self", name: localName, node: prog.wrap });
+    }
+    outgoingTransfers[id] = {
+      bar: prog.bar,
+      pct: prog.pct,
+      wrap: prog.wrap,
+      cancelled: false,
+      details: prog.details,
+      size: file.size,
+      started: Date.now(),
+      mime: pending.mime,
+      isMedia,
+      previewNode: pending.previewNode
+    };
+    dc.send(JSON.stringify({
+      t: "file-send-start",
+      id,
+      name: localName,
+      fileName: file.name,
+      mime: pending.mime,
+      size: file.size,
+      chunks: totalChunks
+    }));
+    let offset = 0;
+    let seq = 0;
+    while (offset < file.size) {
+      if (outgoingTransfers[id] && outgoingTransfers[id].cancelled) {
+        delete pendingOutgoingFiles[id];
+        delete outgoingTransfers[id];
+        return;
+      }
+      if (!dc || dc.readyState !== "open") {
+        replaceWithMessage(prog.wrap, "Send failed: connection closed");
+        delete pendingOutgoingFiles[id];
+        delete outgoingTransfers[id];
+        return;
+      }
+      if (dc.bufferedAmount > MAX_BUFFER) {
+        await waitForBuffer(dc, MAX_BUFFER / 2);
+      }
+      const sliceBlob = file.slice(offset, offset + CHUNK_SIZE);
+      const sliceBuffer = await sliceBlob.arrayBuffer();
+      const slice = new Uint8Array(sliceBuffer);
+      dc.send(JSON.stringify({
+        t: "file-chunk",
+        id,
+        seq,
+        data: base64FromUint8(slice)
+      }));
+      offset += slice.length;
+      seq += 1;
+    }
+    prog.pct.textContent = "Waiting for receiver...";
+    delete pendingOutgoingFiles[id];
+  }
+
 </script>
 
-</body>
+  </body>
 </html>
