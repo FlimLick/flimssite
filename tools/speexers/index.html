@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speexers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap"></noscript>
+  <link rel="stylesheet" href="/tools/main.css">
+  <link rel="stylesheet" href="/tools/speexers/speexers.css">
+  <script src="coi-serviceworker.min.js"></script>
+  <script src="/tools/speexers/ffmpeg.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <div class="page-header pad-wrap">
+      <div class="header-left" style="display:flex; align-items:center; gap:10px; flex-wrap:nowrap;">
+        <form action="/tools" style="margin:0;">
+          <button type="button" class="back-btn" aria-label="Back" data-nav="/tools">
+            <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" focusable="false" class="back-icon">
+              <path d="M18 7 L10 15 L18 23" />
+            </svg>
+          </button>
+        </form>
+        <h1 class="inline-title">Speexers</h1>
+        <span class="pill beta-tag">Indev</span>
+      </div>
+      <div class="top-actions" style="position:static;"></div>
+    </div>
+
+    <div class="card section">
+      <div class="row mode-row">
+        <button id="modeMic" class="is-active">Microphone</button>
+        <button id="modeFile">File</button>
+      </div>
+      <div class="row settings-row">
+        <label>Sample rate
+          <select id="sampleRateSelect">
+            <option value="8000">8 kHz</option>
+            <option value="16000" selected>16 kHz</option>
+            <option value="24000">24 kHz</option>
+            <option value="48000">48 kHz</option>
+          </select>
+        </label>
+        <label>Bandwidth
+          <select id="bandwidthSelect">
+            <option value="wide" selected>Wideband (16 kHz)</option>
+            <option value="narrow">Narrowband (8 kHz)</option>
+            <option value="custom">Custom (use sample rate)</option>
+          </select>
+        </label>
+        <label>Bitrate
+          <select id="bitrateSelect">
+            <option value="12k">12 kbps</option>
+            <option value="16k" selected>16 kbps</option>
+            <option value="24k">24 kbps</option>
+            <option value="32k">32 kbps</option>
+            <option value="64k">64 kbps</option>
+          </select>
+        </label>
+        <label>Channels
+          <select id="channelSelect">
+            <option value="1" selected>Mono</option>
+            <option value="2">Stereo</option>
+          </select>
+        </label>
+        <label>Codec
+          <select id="codecSelect">
+            <option value="codec2" selected>Codec2</option>
+            <option value="opus">Opus</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="mode-wrapper">
+        <div id="micBox" class="mode-panel">
+          <div class="row">
+            <button id="startMic">Start mic</button>
+            <button id="stopMic" disabled>Stop mic</button>
+            <span id="micStatus" class="pill" aria-live="polite">idle</span>
+          </div>
+          <p class="subtitle">Low-bitrate monitor using your selected codec/settings.</p>
+          <audio id="micPreview" controls class="full-audio" aria-label="Mic preview" autoplay></audio>
+        </div>
+
+        <div id="fileBox" class="mode-panel hide">
+          <div class="row">
+            <input type="file" id="fileInput" accept="audio/*">
+            <button id="processFile">Convert</button>
+          </div>
+          <p class="subtitle">Convert a file using the same sample rate/bitrate/channels and codec.</p>
+          <audio id="filePreview" controls class="full-audio" aria-label="File preview"></audio>
+          <div class="row file-meta">
+            <span id="fileInfo" class="meta-text"></span>
+            <button id="downloadFile" disabled>Download</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/tools/tools.js"></script>
+  <script src="/tools/speexers/speexers.js"></script>
+</body>
+</html>

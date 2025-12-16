@@ -1,0 +1,110 @@
+.section {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+.subtitle {
+  color: var(--muted);
+  font-size: 16px;
+}
+.mode-row {
+  gap: 10px;
+}
+.mode-row button.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 59, 59, 0.25);
+}
+.full-audio {
+  width: 100%;
+  margin-top: 10px;
+}
+.mode-panel {
+  transition: opacity 220ms ease, transform 220ms ease;
+  position: relative;
+  opacity: 1;
+  transform: translateY(0);
+}
+.mode-panel.hide {
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+.file-meta {
+  margin-top: 8px;
+  gap: 10px;
+  align-items: center;
+}
+.settings-row {
+  flex-wrap: wrap;
+}
+.settings-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.settings-row select {
+  min-width: 120px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(36, 24, 26, 0.9));
+  color: var(--ink);
+  box-shadow:
+    0 6px 14px var(--shadow),
+    inset 0 1px 0 var(--highlight),
+    inset 0 -1px 3px rgba(0, 0, 0, 0.5);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 120ms ease, background-color 150ms ease;
+}
+.settings-row select:hover {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(46, 30, 32, 0.9));
+}
+.settings-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px rgba(231, 76, 60, 0.25),
+    inset 0 1px 0 var(--highlight),
+    inset 0 -1px 3px rgba(0,0,0,0.45);
+}
+.settings-row select:active {
+  transform: translateY(1px);
+}
+.settings-row label {
+  white-space: nowrap;
+}
+
+.mode-wrapper {
+  position: relative;
+  min-height: 260px;
+}
+
+/* Inline header title */
+.inline-title {
+  margin: 0 10px;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+@media (max-width: 715px) {
+  .page-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+  }
+  .header-left {
+    flex: 1;
+    gap: 8px;
+  }
+  .inline-title {
+    font-size: 28px;
+    margin: 0 6px;
+  }
+  .beta-tag {
+    margin-left: 4px;
+  }
+}
