@@ -40,31 +40,8 @@
     if (activeLink) activeLink.classList.add("is-active");
   };
 
-  const injectHeader = async () => {
-    const mount = document.querySelector("#site-header");
-    if (!mount) return;
-
-    try {
-      const response = await fetch("/partials/header.html", { cache: "no-cache" });
-      if (!response.ok) return;
-      mount.innerHTML = await response.text();
-      setActiveNav();
-    } catch (err) {
-      return;
-    }
-  };
-
-  const injectFooter = async () => {
-    const mount = document.querySelector("#site-footer");
-    if (!mount) return;
-
-    try {
-      const response = await fetch("/partials/footer.html", { cache: "no-cache" });
-      if (!response.ok) return;
-      mount.innerHTML = await response.text();
-    } catch (err) {
-      return;
-    }
+  const applyActiveNav = () => {
+    setActiveNav();
   };
 
   const showContactConfirmation = () => {
@@ -111,8 +88,7 @@
     handleNavigate(event, link);
   });
 
-  injectHeader();
-  injectFooter();
+  applyActiveNav();
   showContactConfirmation();
   bindContactForm();
 })();

@@ -24,6 +24,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap">
+  <link rel="preload" as="image" href="images/DroneStuff.png">
   <link rel="icon" href="/images/favicon.ico">
   <link rel="stylesheet" href="css/style.css">
   <script type="application/ld+json">
@@ -39,7 +40,27 @@
 </head>
 <body class="page-transition-in" data-active="projects">
   <div class="site-shell">
-    <div id="site-header"></div>
+    <header class="site-header card">
+      <div class="brand">
+        <div class="brand-row">
+          <h1 class="brand-name">
+            <a class="brand-link" href="/index.html">
+              <img src="/images/favicon.ico" alt="Flims Site icon">
+              <span>Flims Site</span>
+            </a>
+          </h1>
+          <span class="dev-note">In development</span>
+        </div>
+      </div>
+      <a class="skip-link" href="#main-content">Skip to main content</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a class="nav-link" href="/index.html" data-nav="index">Home</a>
+        <a class="nav-link" href="/about.html" data-nav="about">About</a>
+        <a class="nav-link" href="/projects.html" data-nav="projects">Projects</a>
+        <a class="nav-link" href="/contact.html" data-nav="contact">Contact</a>
+        <a class="nav-link nav-link-special" href="/tools/" data-nav="tools">Tools</a>
+      </nav>
+    </header>
 
     <main id="main-content" class="section">
       <section class="hero-banner" style="background-image: linear-gradient(140deg, rgba(16, 12, 14, 0.85), rgba(255, 63, 63, 0.22)), url('images/DroneStuff.png');">
@@ -77,7 +98,36 @@
       </section>
     </main>
 
-    <div id="site-footer"></div>
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div>
+          <h2 class="footer-title">Flims Site</h2>
+          <p class="footer-text">Portfolio focused on game systems, multiplayer tooling, and audio-first experiences.</p>
+          <div class="footer-meta">
+            <span class="pill">Game Dev</span>
+            <span class="pill">Audio</span>
+            <span class="pill">Tools</span>
+          </div>
+        </div>
+        <div>
+          <h3>Explore</h3>
+          <a class="footer-link" href="/index.html">Home</a>
+          <a class="footer-link" href="/about.html">About</a>
+          <a class="footer-link" href="/projects.html">Projects</a>
+          <a class="footer-link" href="/contact.html">Contact</a>
+          <a class="footer-link" href="/tools/">Tools</a>
+        </div>
+        <div>
+          <h3>Contact</h3>
+          <p class="footer-text">Open to collaboration and interesting builds.</p>
+          <a class="footer-link" href="/contact.html">Start a conversation</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span class="footer-copy"></span>
+        <span>Built with a custom visual system.</span>
+      </div>
+    </footer>
   </div>
   <script src="js/site.js" defer></script>
   <script src="js/image-preview.js" defer></script>
