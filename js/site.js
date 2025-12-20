@@ -67,6 +67,44 @@
     }
   };
 
+  const showContactConfirmation = () => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("submitted") !== "true") return;
+    const banner = document.querySelector("[data-confirmation]");
+    if (!banner) return;
+    banner.hidden = false;
+  };
+
+  const bindContactForm = () => {
+    const form = document.querySelector("#contact-form");
+    if (!form) return;
+    const banner = document.querySelector("[data-confirmation]");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submitButton = form.querySelector("button[type=\"submit\"]");
+      if (submitButton) submitButton.disabled = true;
+
+      try {
+        const formData = new FormData(form);
+        const response = await fetch(form.action, {
+          method: "POST",
+          body: formData,
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) throw new Error("Form submit failed");
+        if (banner) banner.hidden = false;
+        form.reset();
+      } catch (err) {
+        if (banner) {
+          banner.textContent = "Something went wrong. Please try again.";
+          banner.hidden = false;
+        }
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
+    });
+  };
+
   document.addEventListener("click", (event) => {
     const link = event.target.closest("a[href]");
     if (!link) return;
@@ -75,4 +113,6 @@
 
   injectHeader();
   injectFooter();
+  showContactConfirmation();
+  bindContactForm();
 })();
