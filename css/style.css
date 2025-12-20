@@ -5,7 +5,7 @@
   --soft-glow: rgba(255, 63, 63, 0.2);
   --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(20, 15, 16, 0.92));
   --page-pad: 18px;
-  --copyright-text: "© 2026 Flims Site. All rights reserved.";
+  --copyright-text: "© 2026 Flims Lab. All rights reserved.";
 }
 
 body {
@@ -117,6 +117,7 @@ img {
   align-items: center;
   gap: 10px;
   margin: 0;
+  white-space: nowrap;
 }
 
 .brand-row {
@@ -256,7 +257,7 @@ img {
 .hero-banner-content {
   position: relative;
   z-index: 1;
-  max-width: 520px;
+  max-width: none;
 }
 
 .hero-banner h1 {
