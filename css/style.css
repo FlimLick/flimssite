@@ -237,7 +237,7 @@ img {
   padding: 24px;
   background:
     linear-gradient(140deg, rgba(16, 12, 14, 0.85), rgba(255, 63, 63, 0.22)),
-    url("../images/background.png") center/cover no-repeat;
+    url("../images/background.webp") center/cover no-repeat;
   box-shadow:
     0 14px 30px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 var(--highlight),
@@ -259,7 +259,7 @@ img {
   max-width: 520px;
 }
 
-.hero-banner h2 {
+.hero-banner h1 {
   margin: 0 0 10px;
   font-size: clamp(34px, 5vw, 52px);
 }
@@ -524,15 +524,15 @@ body.preview-open {
 }
 
 .project-bg-photon::before {
-  background-image: url("../images/photon-spaceway.png");
+  background-image: url("../images/photon-spaceway.webp");
 }
 
 .project-bg-carrier::before {
-  background-image: url("../images/carrier.png");
+  background-image: url("../images/carrier.webp");
 }
 
 .project-bg-drone::before {
-  background-image: url("../images/DroneStuff.png");
+  background-image: url("../images/DroneStuff.webp");
 }
 
 .tag-row {
@@ -627,6 +627,7 @@ body.preview-open {
   margin-right: calc(var(--page-pad) * -1);
   width: calc(100% + (var(--page-pad) * 2));
   margin-top: auto;
+  position: relative;
 }
 
 .footer-grid {
@@ -675,6 +676,45 @@ body.preview-open {
   padding-top: 12px;
   color: var(--muted);
   font-size: 13px;
+  align-items: center;
+}
+
+.footer-socials {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  margin: 0;
+}
+
+.social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(20, 15, 16, 0.92));
+  color: var(--ink);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 var(--highlight);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.social-link:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 var(--highlight);
+}
+
+.social-link svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .footer-copy::before {
@@ -692,5 +732,11 @@ body.preview-open {
 
   .nav-link {
     width: auto;
+  }
+
+  .footer-socials {
+    position: static;
+    margin-left: auto;
+    margin-right: 0;
   }
 }
