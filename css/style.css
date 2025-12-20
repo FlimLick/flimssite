@@ -11,6 +11,9 @@
 body {
   padding: var(--page-pad);
   overflow-x: hidden;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 a:focus-visible,
@@ -55,6 +58,7 @@ img {
   flex-direction: column;
   gap: 20px;
   position: relative;
+  flex: 1;
 }
 
 .site-shell::before,
@@ -622,6 +626,7 @@ body.preview-open {
   margin-left: calc(var(--page-pad) * -1);
   margin-right: calc(var(--page-pad) * -1);
   width: calc(100% + (var(--page-pad) * 2));
+  margin-top: auto;
 }
 
 .footer-grid {
