@@ -35,7 +35,7 @@ body {
 }
 
 a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: none; }
 
 h1 {
   margin: 0 0 6px;
