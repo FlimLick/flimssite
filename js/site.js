@@ -44,6 +44,57 @@
     setActiveNav();
   };
 
+  const initSettingsMenu = () => {
+    const wrap = document.querySelector(".settings-wrap");
+    if (!wrap) return;
+    const toggle = wrap.querySelector(".settings-toggle");
+    const menu = wrap.querySelector(".settings-menu");
+    const checkbox = wrap.querySelector("#sound-toggle");
+    const themeSelect = wrap.querySelector("#theme-select");
+    if (!toggle || !menu || !checkbox) return;
+
+    const storageKey = "flimsLabSound";
+    const themeKey = "flimsLabTheme";
+    const stored = localStorage.getItem(storageKey);
+    checkbox.checked = stored === "true";
+    if (themeSelect) {
+      const storedTheme = localStorage.getItem(themeKey) || "crimson";
+      themeSelect.value = storedTheme;
+      document.body.classList.remove("theme-ember", "theme-glacier", "theme-forest", "theme-graphite");
+      if (storedTheme !== "crimson") {
+        document.body.classList.add(`theme-${storedTheme}`);
+      }
+    }
+
+    const setExpanded = (value) => {
+      wrap.classList.toggle("is-open", value);
+      toggle.setAttribute("aria-expanded", value ? "true" : "false");
+    };
+
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setExpanded(!wrap.classList.contains("is-open"));
+    });
+
+    document.addEventListener("click", () => setExpanded(false));
+    menu.addEventListener("click", (event) => event.stopPropagation());
+
+    checkbox.addEventListener("change", () => {
+      localStorage.setItem(storageKey, checkbox.checked ? "true" : "false");
+    });
+
+    if (themeSelect) {
+      themeSelect.addEventListener("change", () => {
+        const value = themeSelect.value;
+        localStorage.setItem(themeKey, value);
+        document.body.classList.remove("theme-ember", "theme-glacier", "theme-forest", "theme-graphite");
+        if (value !== "crimson") {
+          document.body.classList.add(`theme-${value}`);
+        }
+      });
+    }
+  };
+
   const showContactConfirmation = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("submitted") !== "true") return;
@@ -82,6 +133,150 @@
     });
   };
 
+  const initUiSounds = () => {
+    const hoverSound = new Audio("/audio/hover.wav");
+    const clickSound = new Audio("/audio/click.wav");
+    hoverSound.preload = "auto";
+    clickSound.preload = "auto";
+    hoverSound.volume = 1.0;
+    clickSound.volume = 1.0;
+
+    let activated = false;
+    let lastHover = null;
+    let soundEnabled = localStorage.getItem("flimsLabSound") === "true";
+
+    const unlockAudio = () => {
+      if (activated) return;
+      activated = true;
+      hoverSound.load();
+      clickSound.load();
+      hoverSound.play().then(() => {
+        hoverSound.pause();
+        hoverSound.currentTime = 0;
+      }).catch(() => {});
+      clickSound.play().then(() => {
+        clickSound.pause();
+        clickSound.currentTime = 0;
+      }).catch(() => {});
+    };
+
+    const isClickable = (el) => {
+      if (!el) return false;
+      if (el.matches("button:disabled, input:disabled")) return false;
+      return el.matches(
+        "a, button, .nav-link, .project-link, .social-link, .footer-link, .image-grid img, [role=\"button\"], [tabindex], input[type=\"button\"], input[type=\"submit\"], input[type=\"reset\"]"
+      );
+    };
+
+    const playSound = (audio) => {
+      if (!soundEnabled) return;
+      audio.playbackRate = 0.92 + Math.random() * 0.16;
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    };
+
+    const playHover = (target) => {
+      if (!activated || !target || target === lastHover) return;
+      lastHover = target;
+      playSound(hoverSound);
+    };
+
+    const playClick = () => {
+      unlockAudio();
+      playSound(clickSound);
+    };
+
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        unlockAudio();
+        soundEnabled = localStorage.getItem("flimsLabSound") === "true";
+      },
+      { once: true, capture: true }
+    );
+
+    document.addEventListener(
+      "keydown",
+      () => {
+        unlockAudio();
+        soundEnabled = localStorage.getItem("flimsLabSound") === "true";
+      },
+      { once: true, capture: true }
+    );
+
+    document.addEventListener(
+      "touchstart",
+      () => {
+        unlockAudio();
+        soundEnabled = localStorage.getItem("flimsLabSound") === "true";
+      },
+      { once: true, capture: true }
+    );
+
+    document.addEventListener(
+      "pointerover",
+      (event) => {
+        if (event.pointerType && event.pointerType !== "mouse") return;
+        const target = event.target.closest(
+          "a, button, .nav-link, .project-link, .social-link, .footer-link, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"], input[type=\"reset\"]"
+        );
+        if (!isClickable(target)) return;
+        playHover(target);
+      },
+      true
+    );
+
+    document.addEventListener(
+      "mouseover",
+      (event) => {
+        const target = event.target.closest(
+          "a, button, .nav-link, .project-link, .social-link, .footer-link, .image-grid img, [role=\"button\"], [tabindex], input[type=\"button\"], input[type=\"submit\"], input[type=\"reset\"]"
+        );
+        if (!isClickable(target)) return;
+        playHover(target);
+      },
+      true
+    );
+
+    document.addEventListener(
+      "focusin",
+      (event) => {
+        unlockAudio();
+        const target = event.target.closest(
+          "a, button, .nav-link, .project-link, .social-link, .footer-link, .image-grid img, [role=\"button\"], [tabindex], input[type=\"button\"], input[type=\"submit\"], input[type=\"reset\"]"
+        );
+        if (!isClickable(target)) return;
+        playHover(target);
+      },
+      true
+    );
+
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        const target = event.target.closest(
+          "a, button, .nav-link, .project-link, .social-link, .footer-link, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"], input[type=\"reset\"]"
+        );
+        if (!isClickable(target)) return;
+        playClick();
+      },
+      true
+    );
+
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const target = event.target.closest(
+          "a, button, .nav-link, .project-link, .social-link, .footer-link, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"], input[type=\"reset\"]"
+        );
+        if (!isClickable(target)) return;
+        playClick();
+      },
+      true
+    );
+  };
+
   document.addEventListener("click", (event) => {
     const link = event.target.closest("a[href]");
     if (!link) return;
@@ -89,6 +284,8 @@
   });
 
   applyActiveNav();
+  initSettingsMenu();
   showContactConfirmation();
   bindContactForm();
+  initUiSounds();
 })();

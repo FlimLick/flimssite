@@ -19,6 +19,7 @@
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap"></noscript>
   <link rel="stylesheet" href="/tools/main.css">
+  <script src="/tools/theme.js" defer></script>
   <style>
     .page-wrap {
       width: 100%;
@@ -38,7 +39,7 @@
     .tool-card {
       cursor: pointer;
       border: 1px solid var(--border);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(36, 24, 26, 0.9));
+      background: var(--panel-grad);
       box-shadow:
         0 6px 14px var(--shadow),
         inset 0 1px 0 var(--highlight),
@@ -51,7 +52,7 @@
     .tool-link:hover .tool-card {
       border-color: var(--accent);
       box-shadow: 0 10px 22px rgba(0,0,0,0.45), inset 0 1px 0 var(--highlight);
-      background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(46,30,32,0.9));
+      background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), rgba(36, 24, 26, 0.92));
     }
     .tool-link:active .tool-card {
       transform: translateY(0);
@@ -114,7 +115,7 @@
     gtag('config', 'G-QGXVQM3M03');
   </script>
 </head>
-<body>
+<body data-audio="click">
   <div class="page-wrap">
     <header class="row" style="justify-content: space-between; align-items: flex-end;">
       <div class="row" style="gap: 12px; align-items: center;">
@@ -131,6 +132,22 @@
     </header>
 
     <div class="tools-grid">
+      <a class="tool-link" href="/tools/ywebrtc/">
+        <div class="card tool-card" data-created="2026-01-12" data-updated="2026-01-12">
+          <div class="row" style="align-items: center; justify-content: space-between; gap: 8px;">
+            <h2 style="margin: 0;">Yjs WebRTC Room Chat</h2>
+            <div class="row tool-tags" style="gap: 6px;">
+              <span class="pill beta-tag">Beta</span>
+              <span class="pill">v0.1.0</span>
+            </div>
+          </div>
+          <p>Room-based chat that uses Yjs + y-webrtc signaling. No manual copy/paste required.</p>
+          <div class="row tool-meta">
+            <span class="meta-text created-text">Created: 01 / 12 / 2026</span>
+            <span class="meta-text updated-text">Updated: 01 / 12 / 2026</span>
+          </div>
+        </div>
+      </a>
       <a class="tool-link" href="/tools/stun/">
         <div class="card tool-card" data-created="2025-12-16" data-updated="2025-12-16">
           <div class="row" style="align-items: center; justify-content: space-between; gap: 8px;">

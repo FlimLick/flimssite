@@ -73,18 +73,18 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   position: relative;
 }
 .pill.connecting {
-  background: linear-gradient(180deg, rgba(255, 195, 113, 0.28), rgba(255, 166, 43, 0.22));
-  border-color: #ff9f43;
-  color: #ffb347;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 28%, transparent), color-mix(in srgb, var(--accent) 18%, transparent));
+  border-color: var(--accent);
+  color: var(--accent-2);
   box-shadow:
     0 6px 12px rgba(0,0,0,0.35),
     inset 0 1px 0 rgba(255,255,255,0.2),
     inset 0 -1px 3px rgba(0,0,0,0.4);
 }
 .pill.connected {
-  background: linear-gradient(180deg, rgba(82, 232, 175, 0.26), rgba(52, 211, 153, 0.22));
-  border-color: #34d399;
-  color: #d1fae5;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent-2) 18%, transparent));
+  border-color: var(--accent);
+  color: var(--accent-2);
   box-shadow:
     0 6px 12px rgba(0,0,0,0.35),
     inset 0 1px 0 rgba(255,255,255,0.2),
@@ -101,7 +101,7 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   font-size: 18px;
   line-height: 1.45;
   padding: 8px 10px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(26,18,20,0.92));
+  background: var(--panel-grad);
   border-radius: 12px;
   border: 1px solid var(--border);
   box-shadow:
@@ -113,11 +113,11 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   animation: chatLineIn 220ms ease;
 }
 .log-line.self {
-  background: linear-gradient(180deg, rgba(255,77,77,0.04), rgba(28,18,19,0.9));
+  background: var(--panel-grad);
   font-weight: 600;
   font-style: italic;
 }
-.log-line.peer { background: linear-gradient(180deg, rgba(255,138,122,0.04), rgba(32,22,23,0.9)); }
+.log-line.peer { background: var(--panel-grad); }
 .log-line.expired { opacity: 0.45; }
 .log-head {
   display: flex;
@@ -131,7 +131,7 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   border-radius: 999px;
   border: 1.5px solid rgba(255,255,255,0.08);
   font-size: 12px;
-  color: #f2e8e8;
+  color: var(--ink);
   background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(52,42,44,0.82));
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.06),
@@ -139,13 +139,13 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
     0 3px 8px rgba(0,0,0,0.18);
 }
 .log-line.self .log-badge {
-  color: #f9eded;
-  background: linear-gradient(180deg, rgba(255,180,170,0.25), rgba(70,40,42,0.9));
-  border-color: rgba(255,140,120,0.4);
+  color: var(--ink);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 22%, transparent), rgba(70,40,42,0.9));
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .log-line.peer .log-badge {
   background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(46,34,36,0.85));
-  color: #f1e5e5;
+  color: var(--ink);
 }
 .log-body {
   color: var(--ink);
@@ -195,7 +195,7 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
 .hide:not(.animated-panel) { display: none !important; }
 .role-toggle button.is-active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(255, 59, 59, 0.25);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .top-actions {
   position: static;
@@ -222,16 +222,6 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-.disclaimer {
-  font-size: 24px;
-  color: var(--muted);
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: rgba(255, 59, 59, 0.04);
-  line-height: 1.45;
-  margin: 0px 0px 12px 12px;
 }
 .debug-modal {
   position: fixed;
@@ -289,7 +279,7 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
 }
 .debug-card pre {
   background: #0b0b0b;
-  color: #f5dada;
+  color: var(--ink);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
@@ -351,6 +341,23 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
 .role-toggle { justify-content: space-between; align-items: center; }
 .role-left { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .status-inline { margin-left: auto; }
+.room-row {
+  align-items: flex-end;
+  gap: 12px;
+}
+.room-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+.room-actions {
+  gap: 8px;
+}
+#roomStatus {
+  font-size: 14px;
+  color: var(--muted);
+}
 .chat-name-row {
   display: flex;
   align-items: center;
@@ -362,6 +369,38 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   flex: 1;
   min-width: 180px;
   max-width: 260px;
+}
+
+#msg {
+  background: var(--panel-grad);
+  border: 1px solid var(--border);
+}
+
+#msg:focus {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent),
+    inset 0 1px 0 var(--highlight),
+    inset 0 -1px 3px rgba(0, 0, 0, 0.45);
+}
+
+textarea,
+input[type="text"],
+input[type="email"],
+input[type="search"] {
+  background: var(--panel-grad);
+  border: 1px solid var(--border);
+}
+
+textarea:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="search"]:focus {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent),
+    inset 0 1px 0 var(--highlight),
+    inset 0 -1px 3px rgba(0, 0, 0, 0.45);
 }
 .chat-name-row button {
   white-space: nowrap;
@@ -457,7 +496,7 @@ h3 { margin: 0 0 6px; font-size: 26px; color: var(--accent-2); font-weight: 500;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 6px;
-  background: rgba(255,59,59,0.05);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .image-box img {
   display: block;

@@ -11,7 +11,7 @@
 }
 .mode-row button.is-active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(255, 59, 59, 0.25);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .full-audio {
   width: 100%;
@@ -50,7 +50,7 @@
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid transparent;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(36, 24, 26, 0.9));
+  background: var(--panel-grad);
   color: var(--ink);
   box-shadow:
     0 6px 14px var(--shadow),
@@ -60,13 +60,13 @@
 }
 .settings-row select:hover {
   border-color: var(--accent);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(46, 30, 32, 0.9));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), rgba(26, 18, 20, 0.9));
 }
 .settings-row select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow:
-    0 0 0 3px rgba(231, 76, 60, 0.25),
+    0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent),
     inset 0 1px 0 var(--highlight),
     inset 0 -1px 3px rgba(0,0,0,0.45);
 }

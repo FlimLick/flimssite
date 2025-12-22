@@ -26,6 +26,7 @@
 
     <link rel="stylesheet" href="/tools/main.css">
     <link rel="stylesheet" href="/tools/stun/stun.css">
+    <script src="/tools/theme.js" defer></script>
     <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-QGXVQM3M03"></script>
   <script>
@@ -36,7 +37,7 @@
     gtag('config', 'G-QGXVQM3M03');
   </script>
 </head>
-  <body>
+  <body data-audio="click">
 
     <div class="page">
       <div class="page-header pad-wrap">
@@ -58,7 +59,7 @@
           <button id="noteToggle">Show instructions</button>
         </div>
       </div>
-      <div class="disclaimer pad-wrap" id="disclaimer">
+      <div class="note pad-wrap animated-panel" id="disclaimer">
         Security note: direct P2P via STUN with manual bundle exchange; no relay or auth. Only share bundles with people you trust and avoid sensitive data.
         <div class="row" style="margin-top:8px;">
           <button id="ackNoteBtn">Acknowledge</button>
@@ -67,9 +68,10 @@
       <div id="howTo" class="note hide pad-wrap animated-panel">
         <strong>How to connect</strong>
         <ol>
-          <li>Caller: click Create Offer, then copy the Base64 bundle.</li>
-          <li>Joiner: paste that bundle, click Apply Offer & Create Answer, then copy the new bundle.</li>
-          <li>Caller: paste the answer bundle and connect. Chat once status is connected.</li>
+          <li>Option A (Room): pick a room code and click Join room on both devices.</li>
+          <li>Caller: click Create Offer. The offer is sent automatically.</li>
+          <li>Joiner: the offer appears and is applied automatically, then the answer is sent back.</li>
+          <li>Option B (Manual): copy/paste the Base64 bundles between devices.</li>
         </ol>
         Two computers connect peer-to-peer via STUN. Bundle strings stay local; no signaling or servers
         involved.
@@ -80,6 +82,17 @@
           <button id="chooseJoiner">Be Joiner</button>
         </div>
         <span class="pill status-inline" id="statusChat">idle</span>
+      </div>
+      <div class="row pad-wrap room-row">
+        <div class="room-field">
+          <label for="roomCode">Room code</label>
+          <input id="roomCode" placeholder="Enter room code">
+        </div>
+        <div class="row room-actions">
+          <button id="newRoomBtn">New code</button>
+          <button id="joinRoomBtn">Join room</button>
+        </div>
+        <span class="meta-text" id="roomStatus">No room connected</span>
       </div>
       <div id="callerSection" class="section-wrap hide animated-panel">
         <div class="card">

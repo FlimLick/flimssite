@@ -51,7 +51,7 @@
     gtag('config', 'G-QGXVQM3M03');
   </script>
 </head>
-<body class="page-transition-in" data-active="index">
+<body data-audio="click" class="page-transition-in" data-active="index">
   <div class="site-shell">
     <header class="site-header card">
       <div class="brand">
@@ -72,6 +72,30 @@
         <a class="nav-link" href="/projects" data-nav="projects">Projects</a>
         <a class="nav-link" href="/contact" data-nav="contact">Contact</a>
         <a class="nav-link nav-link-special" href="/tools/" data-nav="tools">Tools</a>
+        <div class="settings-wrap">
+          <button class="nav-link settings-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="settings-icon">
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
+            </svg>
+          </button>
+          <div class="settings-menu" role="menu">
+            <label class="settings-item">
+              <input type="checkbox" id="sound-toggle">
+              <span>Enable sounds</span>
+            </label>
+            <label class="settings-item">
+              <span>Theme tint</span>
+              <select id="theme-select">
+                <option value="crimson">Crimson</option>
+                <option value="ember">Ember</option>
+                <option value="glacier">Glacier</option>
+                <option value="forest">Forest</option>
+                <option value="graphite">Graphite</option>
+              </select>
+            </label>
+          </div>
+        </div>
       </nav>
     </header>
 

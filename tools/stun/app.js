@@ -21,8 +21,14 @@
   const debugClose = $("debugClose");
   const ackNoteBtn = $("ackNoteBtn");
   const disclaimer = $("disclaimer");
+  const roomInput = $("roomCode");
+  const joinRoomBtn = $("joinRoomBtn");
+  const newRoomBtn = $("newRoomBtn");
+  const roomStatus = $("roomStatus");
   const NAME_KEY = "p2p-username";
   const ACK_KEY = "p2p-security-ack";
+  const ROOM_KEY = "p2p-room";
+  const SIGNAL_URL = "wss://signaling.simplewebrtc.com";
 
   const firstNames = [
     "Crimson","Ruby","Scarlet","Garnet","Ember","Brick","Cinder","Maroon","Sienna","Copper",
@@ -68,6 +74,9 @@
   let hasAcked = false;
   let showCallerSection = true;
   let showJoinerSection = true;
+  let ws = null;
+  let wsReady = false;
+  let activeRoom = "";
 
   function loadSavedName() {
     try {
@@ -87,6 +96,90 @@
       if (v === "1") return true;
     } catch {}
     return false;
+  }
+
+  function loadRoom() {
+    try {
+      const v = localStorage.getItem(ROOM_KEY);
+      if (v) return v;
+    } catch {}
+    return "";
+  }
+
+  function saveRoom(value) {
+    try { localStorage.setItem(ROOM_KEY, value); } catch {}
+  }
+
+  function updateRoomStatus(text) {
+    if (roomStatus) roomStatus.textContent = text;
+  }
+
+  function generateRoomCode() {
+    return Math.random().toString(36).slice(2, 8).toUpperCase();
+  }
+
+  function closeSignal() {
+    if (ws) {
+      ws.close();
+    }
+    ws = null;
+    wsReady = false;
+  }
+
+  function sendSignal(type, bundle) {
+    if (!wsReady || !activeRoom) return;
+    const payload = {
+      t: type,
+      room: activeRoom,
+      from: localName,
+      bundle
+    };
+    ws.send(JSON.stringify(payload));
+  }
+
+  function connectSignal(room) {
+    if (!room) return;
+    activeRoom = room;
+    saveRoom(room);
+    updateRoomStatus(`Connecting to ${room}...`);
+    closeSignal();
+    ws = new WebSocket(SIGNAL_URL);
+    ws.addEventListener("open", () => {
+      wsReady = true;
+      updateRoomStatus(`Connected to ${room}`);
+      ws.send(JSON.stringify({ t: "join", room, from: localName }));
+    });
+    ws.addEventListener("close", () => {
+      wsReady = false;
+      updateRoomStatus("Disconnected");
+    });
+    ws.addEventListener("error", () => {
+      wsReady = false;
+      updateRoomStatus("Signal error");
+    });
+    ws.addEventListener("message", async (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const msgRoom = msg.room || msg.channel;
+      if (msgRoom && activeRoom && msgRoom !== activeRoom) return;
+      const type = msg.t || msg.type;
+      const bundle = msg.bundle || msg.payload?.bundle || msg.data?.bundle;
+      if (!type || !bundle) return;
+      if (type === "offer") {
+        if (role !== "joiner") setRole("joiner");
+        $("offerIn").value = bundle;
+        await applyOfferFlow();
+      }
+      if (type === "answer") {
+        if (role !== "caller") setRole("caller");
+        $("answerIn").value = bundle;
+        await applyAnswerFlow();
+      }
+    });
   }
 
   function buildPendingFileNode({ fileName = "file", mime = "file", size = 0 }) {
@@ -144,6 +237,28 @@
   if (setNameBtn) {
     setNameBtn.addEventListener("click", () => {
       applyName({ announce: true, save: true, allowRandom: true });
+    });
+  }
+
+  if (roomInput) {
+    const savedRoom = loadRoom();
+    if (savedRoom) {
+      roomInput.value = savedRoom;
+      connectSignal(savedRoom);
+    }
+  }
+  if (newRoomBtn) {
+    newRoomBtn.addEventListener("click", () => {
+      const code = generateRoomCode();
+      if (roomInput) roomInput.value = code;
+      connectSignal(code);
+    });
+  }
+  if (joinRoomBtn) {
+    joinRoomBtn.addEventListener("click", () => {
+      const code = (roomInput?.value || "").trim();
+      if (!code) return;
+      connectSignal(code);
     });
   }
 
@@ -526,7 +641,17 @@
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun.cloudflare.com:3478" }
+      { urls: "stun:stun.cloudflare.com:3478" },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      {
+        urls: "turn:turn.anyfirewall.com:443?transport=tcp",
+        username: "webrtc",
+        credential: "webrtc"
+      }
     ]
   };
 
@@ -1013,6 +1138,7 @@ function waitIce(pc) {
     $("applyAnswerBtn").disabled = false;
     setStatus("offer-ready");
     log({ kind: "info", text: "Offer ready" });
+    sendSignal("offer", offerBundle);
   }
 
   async function applyAnswerFlow() {
@@ -1063,6 +1189,7 @@ function waitIce(pc) {
     copyToClipboard(answerBundle);
     setStatus("answer-ready");
     log({ kind: "info", text: "Answer ready" });
+    sendSignal("answer", answerBundle);
   }
 
   $("applyOfferBtn").onclick = () => { applyOfferFlow(); };
