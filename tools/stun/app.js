@@ -78,6 +78,7 @@
   let joinAuthenticated = false;
   let activePeerId = "";
   let joinRetryTimer = null;
+  const broadcastGroups = new Map();
 
   function loadSavedName() {
     try {
@@ -393,28 +394,32 @@
     });
   }
 
-  function getActivePeer() {
-    if (activePeerId && peers.has(activePeerId)) {
-      const peer = peers.get(activePeerId);
-      if (peer.authenticated && peer.dc && peer.dc.readyState === "open") return peer;
-    }
-    for (const peer of peers.values()) {
-      if (peer.authenticated && peer.dc && peer.dc.readyState === "open") return peer;
-    }
-    return null;
+  function makeBroadcastId(senderId, id) {
+    return `b|${senderId}|${id}`;
   }
 
-  function getAttachmentTarget() {
+  function parseBroadcastId(id) {
+    if (typeof id !== "string" || !id.startsWith("b|")) return null;
+    const parts = id.split("|");
+    if (parts.length < 3) return null;
+    return { senderId: parts[1], originalId: parts.slice(2).join("|") };
+  }
+
+  function getAttachmentTargets() {
     if (role === "caller") {
-      const peer = getActivePeer();
-      if (!peer) return null;
-      return { channel: peer.dc, name: peer.name || "Peer" };
+      const targets = [];
+      peers.forEach(peer => {
+        if (peer.authenticated && peer.dc && peer.dc.readyState === "open") {
+          targets.push({ channel: peer.dc, name: peer.name || "Peer", peerId: peer.id });
+        }
+      });
+      return targets;
     }
     if (role === "joiner") {
-      if (!joinAuthenticated || !dc || dc.readyState !== "open") return null;
-      return { channel: dc, name: peerName || "Host" };
+      if (!joinAuthenticated || !dc || dc.readyState !== "open") return [];
+      return [{ channel: dc, name: peerName || "Host" }];
     }
-    return null;
+    return [];
   }
 
   function clearPendingAttachmentUi() {
@@ -596,6 +601,20 @@
     }
     activePeerId = peerId;
     if (msg.t && msg.t.startsWith("file-")) {
+      if (parseBroadcastId(msg.id)) {
+        return;
+      }
+      if (msg.t === "file-request") {
+        sendPacket(peer.dc, { t: "file-accept", id: msg.id });
+        return;
+      }
+      if (msg.t === "file-send-start" || msg.t === "file-chunk" || msg.t === "file-cancel") {
+        const broadcastId = makeBroadcastId(peerId, msg.id);
+        broadcastToPeers(
+          { ...msg, id: broadcastId, name: msg.name || peer.name || "Peer" },
+          peerId
+        );
+      }
       handleFileMessage(msg, { fromName: msg.name || peer.name, channel: peer.dc });
       return;
     }
@@ -737,6 +756,9 @@
     if (msg.t === "file-accept") {
       const pending = pendingOutgoingFiles[msg.id];
       if (pending) {
+        if (pending.groupId && pending.peerId) {
+          updateBroadcastStatus(pending.groupId, pending.peerId, "accepted");
+        }
         sendFileChunks(msg.id, pending);
       }
       return true;
@@ -744,9 +766,16 @@
     if (msg.t === "file-decline") {
       if (pendingOutgoingFiles[msg.id]) {
         const pending = pendingOutgoingFiles[msg.id];
-        if (pending.previewNode) replaceWithMessage(pending.previewNode, `Peer declined ${pending.file?.name || "file"}`);
+        if (pending.groupId && pending.peerId) {
+          updateBroadcastStatus(pending.groupId, pending.peerId, "declined");
+        }
+        if (!pending.groupId && pending.previewNode) {
+          replaceWithMessage(pending.previewNode, `Peer declined ${pending.file?.name || "file"}`);
+        }
         delete pendingOutgoingFiles[msg.id];
-        log({ kind: "info", text: "Peer declined the file transfer" });
+        if (!pending.groupId) {
+          log({ kind: "info", text: "Peer declined the file transfer" });
+        }
       }
       return true;
     }
@@ -760,6 +789,9 @@
       }
       if (outgoingTransfers[msg.id]) {
         const t = outgoingTransfers[msg.id];
+        if (t.groupId && t.peerId) {
+          updateBroadcastStatus(t.groupId, t.peerId, "cancelled");
+        }
         if (t.wrap && t.wrap.parentElement) {
           replaceWithMessage(t.wrap, `Send cancelled for ${pendingOutgoingFiles[msg.id]?.file?.name || "file"}`);
         }
@@ -771,6 +803,10 @@
     if (msg.t === "file-progress") {
       const out = outgoingTransfers[msg.id];
       if (out) {
+        if (out.groupId && out.peerId) {
+          updateBroadcastStatus(out.groupId, out.peerId, `sending ${msg.pct}%`);
+          return true;
+        }
         out.bar.style.width = `${msg.pct}%`;
         out.pct.textContent = `${msg.pct}%`;
         if (out.details) {
@@ -789,6 +825,9 @@
     if (msg.t === "file-received") {
       const out = outgoingTransfers[msg.id];
       if (out) {
+        if (out.groupId && out.peerId) {
+          updateBroadcastStatus(out.groupId, out.peerId, "received");
+        }
         const isMedia = out.isMedia || isMediaType(msg.mime || "", msg.fileName || "");
         if (isMedia && out.wrap && out.wrap.parentElement) {
           const line = out.wrap.closest(".log-line");
@@ -816,6 +855,62 @@
     label.textContent = `${fileName} (${mime}) - ${sizeMb} MB (waiting for accept)`;
     wrap.appendChild(label);
     return wrap;
+  }
+
+  function buildBroadcastStatusNode({ fileName = "file", mime = "file", size = 0, recipients = [], mediaNode = null }) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "6px";
+    wrap.style.width = "100%";
+
+    const sizeMb = size ? `${(size / (1024 * 1024)).toFixed(2)} MB` : "";
+    const header = document.createElement("span");
+    header.textContent = `Sending ${fileName} (${mime || "file"}) ${sizeMb ? `- ${sizeMb}` : ""}`;
+    wrap.appendChild(header);
+
+    if (mediaNode) {
+      wrap.appendChild(mediaNode);
+    }
+
+    const list = document.createElement("div");
+    list.style.display = "flex";
+    list.style.flexDirection = "column";
+    list.style.gap = "4px";
+
+    const statusMap = new Map();
+    recipients.forEach(recipient => {
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "8px";
+
+      const name = document.createElement("span");
+      name.textContent = recipient.name || "Peer";
+      name.style.fontSize = "13px";
+
+      const status = document.createElement("span");
+      status.textContent = "waiting";
+      status.style.fontSize = "12px";
+      status.style.color = "var(--muted)";
+
+      const spacer = document.createElement("span");
+      spacer.style.flex = "1";
+
+      row.append(name, spacer, status);
+      list.appendChild(row);
+      statusMap.set(recipient.peerId || recipient.name || "peer", status);
+    });
+
+    wrap.appendChild(list);
+    return { wrap, statusMap };
+  }
+
+  function updateBroadcastStatus(groupId, peerId, text) {
+    const group = broadcastGroups.get(groupId);
+    if (!group) return;
+    const statusEl = group.statusMap.get(peerId);
+    if (statusEl) statusEl.textContent = text;
   }
 
   function persistName(v) {
@@ -1640,41 +1735,84 @@
   /* ---------- Chat ---------- */
   $("sendBtn").onclick = () => {
     if (pendingAttachment) {
-      const target = getAttachmentTarget();
-      if (!target) {
+      const targets = getAttachmentTargets();
+      if (!targets.length) {
         log({ kind: "info", text: "No peer connected for file sharing." });
         return;
       }
       const f = pendingAttachment;
-      const id = `file-${Date.now()}-${fileIdCounter++}`;
       const mime = guessMime(f);
-      const url = URL.createObjectURL(f);
       const isMedia = isMediaType(mime, f.name);
-      const send = payload => sendPacket(target.channel, payload);
-      if (isMedia) {
-        const previewNode = buildMediaPreview({
+      const now = Date.now();
+      const groupId = role === "caller" ? `group-${now}-${fileIdCounter++}` : "";
+      let group = null;
+      if (role === "caller") {
+        let mediaNode = null;
+        if (isMedia) {
+          const url = URL.createObjectURL(f);
+          mediaNode = buildMediaPreview({
+            fileName: f.name,
+            mime,
+            url,
+            revokeCb: () => URL.revokeObjectURL(url)
+          });
+        }
+        group = buildBroadcastStatusNode({
           fileName: f.name,
           mime,
-          url,
-          revokeCb: () => URL.revokeObjectURL(url)
+          size: f.size,
+          recipients: targets,
+          mediaNode
         });
-        previewNode.style.opacity = "0.6";
-        log({ kind: "self", name: localName, node: previewNode });
-        pendingOutgoingFiles[id] = { file: f, mime, previewNode, replaceWithProgress: false, send, channel: target.channel };
-        sendFileChunks(id, pendingOutgoingFiles[id]);
-      } else {
-        const pendingNode = buildPendingFileNode({ fileName: f.name, mime, size: f.size });
-        log({ kind: "self", name: localName, node: pendingNode });
-        pendingOutgoingFiles[id] = { file: f, mime, previewNode: pendingNode, send, channel: target.channel };
-        send({
-          t: "file-request",
-          id,
-          name: localName,
-          fileName: f.name,
-          mime,
-          size: f.size
-        });
+        broadcastGroups.set(groupId, group);
+        log({ kind: "self", name: localName, node: group.wrap });
       }
+
+      targets.forEach((target, index) => {
+        const peerId = target.peerId || `peer-${index}`;
+        const id = `file-${now}-${fileIdCounter++}-${peerId}`;
+        const send = payload => sendPacket(target.channel, payload);
+        if (role === "caller" && groupId) {
+          updateBroadcastStatus(groupId, peerId, isMedia ? "sending" : "waiting");
+        }
+        if (isMedia) {
+          pendingOutgoingFiles[id] = {
+            file: f,
+            mime,
+            previewNode: group ? group.wrap : null,
+            replaceWithProgress: false,
+            send,
+            channel: target.channel,
+            silent: role === "caller",
+            groupId,
+            peerId
+          };
+          sendFileChunks(id, pendingOutgoingFiles[id]);
+        } else {
+          const pendingNode = role === "caller" ? group.wrap : buildPendingFileNode({ fileName: f.name, mime, size: f.size });
+          if (role !== "caller") {
+            log({ kind: "self", name: localName, node: pendingNode });
+          }
+          pendingOutgoingFiles[id] = {
+            file: f,
+            mime,
+            previewNode: pendingNode,
+            send,
+            channel: target.channel,
+            silent: role === "caller",
+            groupId,
+            peerId
+          };
+          send({
+            t: "file-request",
+            id,
+            name: localName,
+            fileName: f.name,
+            mime,
+            size: f.size
+          });
+        }
+      });
       clearPendingAttachmentUi();
       return;
     }
@@ -1727,40 +1865,49 @@
     const MAX_BUFFER = 512000;
     const channel = pending.channel;
     const send = pending.send || (payload => sendPacket(channel, payload));
+    const silent = !!pending.silent;
     if (!channel || channel.readyState !== "open") {
+      if (pending.groupId && pending.peerId) {
+        updateBroadcastStatus(pending.groupId, pending.peerId, "failed");
+      }
       log({ kind: "info", text: "Send failed: connection closed" });
       delete pendingOutgoingFiles[id];
       return;
     }
     if (channel) channel.bufferedAmountLowThreshold = MAX_BUFFER / 2;
-    const prog = buildProgressNode({
-      label: `Sending ${file.name} (${pending.mime})`,
-      id,
-      onCancel: () => {
-        send({ t: "file-cancel", id });
-        if (outgoingTransfers[id] && outgoingTransfers[id].wrap) {
-          replaceWithMessage(outgoingTransfers[id].wrap, `Send cancelled for ${file.name}`);
-          outgoingTransfers[id].cancelled = true;
-        }
-      },
-      showDetails: true
-    });
-    if (pending.previewNode && pending.replaceWithProgress !== false && pending.previewNode.parentElement) {
-      pending.previewNode.parentElement.replaceChild(prog.wrap, pending.previewNode);
-    } else {
-      log({ kind: "self", name: localName, node: prog.wrap });
+    let prog = null;
+    if (!silent) {
+      prog = buildProgressNode({
+        label: `Sending ${file.name} (${pending.mime})`,
+        id,
+        onCancel: () => {
+          send({ t: "file-cancel", id });
+          if (outgoingTransfers[id] && outgoingTransfers[id].wrap) {
+            replaceWithMessage(outgoingTransfers[id].wrap, `Send cancelled for ${file.name}`);
+            outgoingTransfers[id].cancelled = true;
+          }
+        },
+        showDetails: true
+      });
+      if (pending.previewNode && pending.replaceWithProgress !== false && pending.previewNode.parentElement) {
+        pending.previewNode.parentElement.replaceChild(prog.wrap, pending.previewNode);
+      } else {
+        log({ kind: "self", name: localName, node: prog.wrap });
+      }
     }
     outgoingTransfers[id] = {
-      bar: prog.bar,
-      pct: prog.pct,
-      wrap: prog.wrap,
+      bar: prog ? prog.bar : null,
+      pct: prog ? prog.pct : null,
+      wrap: prog ? prog.wrap : null,
       cancelled: false,
-      details: prog.details,
+      details: prog ? prog.details : null,
       size: file.size,
       started: Date.now(),
       mime: pending.mime,
       isMedia,
-      previewNode: pending.previewNode
+      previewNode: pending.previewNode,
+      groupId: pending.groupId,
+      peerId: pending.peerId
     };
     send({
       t: "file-send-start",
@@ -1780,7 +1927,10 @@
         return;
       }
       if (!channel || channel.readyState !== "open") {
-        replaceWithMessage(prog.wrap, "Send failed: connection closed");
+        if (pending.groupId && pending.peerId) {
+          updateBroadcastStatus(pending.groupId, pending.peerId, "failed");
+        }
+        if (prog) replaceWithMessage(prog.wrap, "Send failed: connection closed");
         delete pendingOutgoingFiles[id];
         delete outgoingTransfers[id];
         return;
@@ -1797,7 +1947,10 @@
         seq,
         data: base64FromUint8(slice)
       })) {
-        replaceWithMessage(prog.wrap, "Send failed: connection closed");
+        if (pending.groupId && pending.peerId) {
+          updateBroadcastStatus(pending.groupId, pending.peerId, "failed");
+        }
+        if (prog) replaceWithMessage(prog.wrap, "Send failed: connection closed");
         delete pendingOutgoingFiles[id];
         delete outgoingTransfers[id];
         return;
