@@ -2,16 +2,10 @@
   const logEl = $("log");
   const statusEl = $("statusChat") || $("status");
   const nameInput = $("name");
-  const callerSection = $("callerSection");
-  const joinerSection = $("joinerSection");
-  const chooseCallerBtn = $("chooseCaller");
-  const chooseJoinerBtn = $("chooseJoiner");
   const noteToggle = $("noteToggle");
   const howTo = $("howTo");
   const chatControls = $("chatControls");
   const setNameBtn = $("setNameBtn");
-  const callerHeader = $("callerHeader");
-  const joinerHeader = $("joinerHeader");
   const attachInput = $("attachInput");
   const attachBtn = $("attachBtn");
   const attachInfo = $("attachInfo");
@@ -22,13 +16,21 @@
   const ackNoteBtn = $("ackNoteBtn");
   const disclaimer = $("disclaimer");
   const roomInput = $("roomCode");
+  const passwordInput = $("roomPassword");
   const joinRoomBtn = $("joinRoomBtn");
   const newRoomBtn = $("newRoomBtn");
+  const hostBtn = $("hostBtn");
+  const leaveBtn = $("leaveBtn");
   const roomStatus = $("roomStatus");
+  const mqttStatus = $("mqttStatus");
+  const stunStatus = $("stunStatus");
+  const webrtcStatus = $("webrtcStatus");
   const NAME_KEY = "p2p-username";
   const ACK_KEY = "p2p-security-ack";
   const ROOM_KEY = "p2p-room";
-  const SIGNAL_URL = "wss://signaling.simplewebrtc.com";
+  const MQTT_URL = "wss://broker.emqx.io:8084/mqtt";
+  const TOPIC_PREFIX = "flims/p2pchat";
+  const SIGNAL_CLIENT_ID = `flims-${Math.random().toString(36).slice(2, 10)}`;
 
   const firstNames = [
     "Crimson","Ruby","Scarlet","Garnet","Ember","Brick","Cinder","Maroon","Sienna","Copper",
@@ -48,18 +50,13 @@
     logEl.scrollTop = logEl.scrollHeight;
     requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
   };
-  const copyToClipboard = async text => {
-    try {
-      await navigator.clipboard.writeText(text);
-      log({ kind: "info", text: "Copied to clipboard" });
-    } catch (e) {
-      log({ kind: "info", text: "Could not copy to clipboard automatically" });
-    }
-  };
-
   let pc = null;
   let dc = null;
   let localCandidates = [];
+  let pendingRemoteCandidates = [];
+  let remoteDescriptionSet = false;
+  const peers = new Map();
+  let hostSignalId = "";
   let role = null;
   let localName = "You";
   let peerName = "Peer";
@@ -72,11 +69,15 @@
   let pendingAttachment = null;
   let logClearedForConnect = false;
   let hasAcked = false;
-  let showCallerSection = true;
-  let showJoinerSection = true;
-  let ws = null;
-  let wsReady = false;
+  let mqttClient = null;
+  let mqttReady = false;
   let activeRoom = "";
+  let activeTopic = "";
+  let connectNonce = 0;
+  let activePassword = "";
+  let joinAuthenticated = false;
+  let activePeerId = "";
+  let joinRetryTimer = null;
 
   function loadSavedName() {
     try {
@@ -114,72 +115,694 @@
     if (roomStatus) roomStatus.textContent = text;
   }
 
+  function setMqttStatus(text) {
+    if (mqttStatus) mqttStatus.textContent = `MQTT: ${text}`;
+  }
+
+  function setStunStatus(text) {
+    if (stunStatus) stunStatus.textContent = `STUN: ${text}`;
+  }
+
+  function setWebrtcStatus(text) {
+    if (webrtcStatus) webrtcStatus.textContent = `WebRTC: ${text}`;
+  }
+
   function generateRoomCode() {
     return Math.random().toString(36).slice(2, 8).toUpperCase();
   }
 
-  function closeSignal() {
-    if (ws) {
-      ws.close();
-    }
-    ws = null;
-    wsReady = false;
+  async function deriveRoomKey(room, password) {
+    const data = new TextEncoder().encode(`${room}:${password}`);
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
   }
 
-  function sendSignal(type, bundle) {
-    if (!wsReady || !activeRoom) return;
+  async function hashValue(value) {
+    const data = new TextEncoder().encode(value);
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function createNonce() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function closeSignal() {
+    if (mqttClient) {
+      mqttClient.end(true);
+    }
+    mqttClient = null;
+    mqttReady = false;
+    activeTopic = "";
+    setMqttStatus("offline");
+    clearJoinRetry();
+  }
+
+  function sendSignal(type, data, target) {
+    if (!mqttReady || !activeRoom || !activeTopic) return;
     const payload = {
       t: type,
       room: activeRoom,
       from: localName,
-      bundle
+      data,
+      sender: SIGNAL_CLIENT_ID,
+      ts: Date.now()
     };
-    ws.send(JSON.stringify(payload));
+    if (target) {
+      payload.target = target;
+    }
+    if (data === undefined) {
+      delete payload.data;
+    }
+    mqttClient.publish(activeTopic, JSON.stringify(payload));
   }
 
-  function connectSignal(room) {
+  function sendPacket(channel, payload) {
+    if (!channel || channel.readyState !== "open") return false;
+    channel.send(JSON.stringify(payload));
+    return true;
+  }
+
+  function sendJoinSignal() {
+    if (!mqttReady || !activeRoom || !activeTopic) return;
+    mqttClient.publish(activeTopic, JSON.stringify({
+      t: "join",
+      room: activeRoom,
+      from: localName,
+      role,
+      sender: SIGNAL_CLIENT_ID,
+      ts: Date.now()
+    }));
+  }
+
+  function clearJoinRetry() {
+    if (joinRetryTimer) {
+      clearInterval(joinRetryTimer);
+      joinRetryTimer = null;
+    }
+  }
+
+  function startJoinRetry() {
+    clearJoinRetry();
+    if (role !== "joiner") return;
+    joinRetryTimer = setInterval(() => {
+      if (role !== "joiner" || !mqttReady || !activeRoom) {
+        clearJoinRetry();
+        return;
+      }
+      sendJoinSignal();
+    }, 2500);
+  }
+
+  async function connectSignal(room, password) {
     if (!room) return;
+    if (!window.mqtt) {
+      updateRoomStatus("Signaling unavailable");
+      return;
+    }
+    if (!password) {
+      updateRoomStatus("Password required");
+      return;
+    }
     activeRoom = room;
     saveRoom(room);
     updateRoomStatus(`Connecting to ${room}...`);
     closeSignal();
-    ws = new WebSocket(SIGNAL_URL);
-    ws.addEventListener("open", () => {
-      wsReady = true;
-      updateRoomStatus(`Connected to ${room}`);
-      ws.send(JSON.stringify({ t: "join", room, from: localName }));
+    setMqttStatus("connecting");
+    const nonce = ++connectNonce;
+    const roomKey = await deriveRoomKey(room, password);
+    if (nonce !== connectNonce) return;
+    activeTopic = `${TOPIC_PREFIX}/${roomKey}`;
+    mqttClient = window.mqtt.connect(MQTT_URL, {
+      clientId: SIGNAL_CLIENT_ID,
+      clean: true,
+      reconnectPeriod: 1500,
+      connectTimeout: 4000
     });
-    ws.addEventListener("close", () => {
-      wsReady = false;
+    mqttClient.on("connect", () => {
+      mqttClient.subscribe(activeTopic, (err) => {
+        if (err) {
+          mqttReady = false;
+          updateRoomStatus("Signal error");
+          setMqttStatus("error");
+          return;
+        }
+        mqttReady = true;
+        updateRoomStatus(`Connected to ${room}`);
+        setMqttStatus("online");
+        if (role === "caller") {
+          setStatus("hosting");
+          updateHostStatus();
+        }
+        sendJoinSignal();
+        if (role === "joiner") {
+          startJoinRetry();
+        }
+      });
+    });
+    mqttClient.on("reconnect", () => {
+      mqttReady = false;
+      setMqttStatus("reconnecting");
+      updateRoomStatus("Reconnecting...");
+    });
+    mqttClient.on("close", () => {
+      mqttReady = false;
+      setMqttStatus("offline");
       updateRoomStatus("Disconnected");
     });
-    ws.addEventListener("error", () => {
-      wsReady = false;
+    mqttClient.on("error", () => {
+      mqttReady = false;
+      setMqttStatus("error");
       updateRoomStatus("Signal error");
     });
-    ws.addEventListener("message", async (event) => {
+    mqttClient.on("message", async (_topic, payload) => {
       let msg;
       try {
-        msg = JSON.parse(event.data);
+        msg = JSON.parse(payload.toString());
       } catch {
         return;
       }
+      if (msg.sender === SIGNAL_CLIENT_ID) return;
       const msgRoom = msg.room || msg.channel;
       if (msgRoom && activeRoom && msgRoom !== activeRoom) return;
+      if (msg.target && msg.target !== SIGNAL_CLIENT_ID) return;
       const type = msg.t || msg.type;
-      const bundle = msg.bundle || msg.payload?.bundle || msg.data?.bundle;
-      if (!type || !bundle) return;
+      if (!type) return;
+      const data = msg.data || msg.payload;
+      if (type === "join") {
+        if (role === "caller" && msg.role === "joiner") {
+          handleJoinRequest(msg.sender, msg.from);
+        }
+        return;
+      }
       if (type === "offer") {
-        if (role !== "joiner") setRole("joiner");
-        $("offerIn").value = bundle;
-        await applyOfferFlow();
+        if (!data?.description) return;
+        if (role !== "joiner") return;
+        clearJoinRetry();
+        hostSignalId = msg.sender || hostSignalId;
+        await applyOfferFlow(data.description);
+        return;
       }
       if (type === "answer") {
-        if (role !== "caller") setRole("caller");
-        $("answerIn").value = bundle;
-        await applyAnswerFlow();
+        if (!data?.description) return;
+        if (role !== "caller") return;
+        await applyHostAnswer(msg.sender, data.description);
+        return;
+      }
+      if (type === "candidate") {
+        if (!data?.candidate) return;
+        if (role === "caller") {
+          await handleHostCandidate(msg.sender, data.candidate);
+        } else if (role === "joiner") {
+          await handleRemoteCandidate(data.candidate);
+        }
+        return;
+      }
+      if (type === "leave") {
+        if (role === "caller") {
+          handlePeerLeave(msg.sender);
+        } else if (role === "joiner") {
+          handleHostLeave();
+        }
       }
     });
+  }
+
+  function getConnectedPeerCount() {
+    let count = 0;
+    peers.forEach(peer => {
+      if (peer.authenticated && peer.dc && peer.dc.readyState === "open") count += 1;
+    });
+    return count;
+  }
+
+  function updateHostStatus() {
+    if (role !== "caller") return;
+    const count = getConnectedPeerCount();
+    if (activeRoom) {
+      updateRoomStatus(`Hosting ${activeRoom} | ${count} online`);
+    }
+    $("sendBtn").disabled = count === 0;
+    setWebrtcStatus(count > 0 ? `connected (${count})` : "hosting");
+    if (count > 0) {
+      setStatus("connected");
+    } else if (mqttReady) {
+      setStatus("hosting");
+    }
+  }
+
+  function updateHostIceStatus() {
+    if (role !== "caller") return;
+    if (!peers.size) {
+      setStunStatus("idle");
+      return;
+    }
+    let connected = 0;
+    let checking = 0;
+    let failed = 0;
+    peers.forEach(peer => {
+      const state = peer.iceState || "new";
+      if (state === "connected" || state === "completed") connected += 1;
+      else if (state === "checking") checking += 1;
+      else if (state === "failed") failed += 1;
+    });
+    if (failed) {
+      setStunStatus("failed");
+    } else if (checking) {
+      setStunStatus("checking");
+    } else if (connected) {
+      setStunStatus(`connected (${connected})`);
+    } else {
+      setStunStatus("new");
+    }
+  }
+
+  function broadcastToPeers(payload, excludeId = "") {
+    const message = JSON.stringify(payload);
+    peers.forEach(peer => {
+      if (peer.id === excludeId) return;
+      if (peer.authenticated && peer.dc && peer.dc.readyState === "open") {
+        peer.dc.send(message);
+      }
+    });
+  }
+
+  function getActivePeer() {
+    if (activePeerId && peers.has(activePeerId)) {
+      const peer = peers.get(activePeerId);
+      if (peer.authenticated && peer.dc && peer.dc.readyState === "open") return peer;
+    }
+    for (const peer of peers.values()) {
+      if (peer.authenticated && peer.dc && peer.dc.readyState === "open") return peer;
+    }
+    return null;
+  }
+
+  function getAttachmentTarget() {
+    if (role === "caller") {
+      const peer = getActivePeer();
+      if (!peer) return null;
+      return { channel: peer.dc, name: peer.name || "Peer" };
+    }
+    if (role === "joiner") {
+      if (!joinAuthenticated || !dc || dc.readyState !== "open") return null;
+      return { channel: dc, name: peerName || "Host" };
+    }
+    return null;
+  }
+
+  function clearPendingAttachmentUi() {
+    pendingAttachment = null;
+    $("msg").value = "";
+    $("msg").readOnly = false;
+    $("msg").placeholder = "Message";
+    if (attachInfo) {
+      attachInfo.classList.add("hide");
+      attachInfo.textContent = "";
+    }
+    $("msg").classList.remove("hide");
+  }
+
+  function sendAuthChallenge(peer) {
+    if (!peer || !peer.dc || peer.dc.readyState !== "open") return;
+    peer.authNonce = createNonce();
+    peer.authenticated = false;
+    peer.dc.send(JSON.stringify({ t: "auth-challenge", v: peer.authNonce }));
+    if (peer.authTimer) clearTimeout(peer.authTimer);
+    peer.authTimer = setTimeout(() => {
+      if (!peer.authenticated) {
+        peer.dc.send(JSON.stringify({ t: "auth-fail" }));
+        handlePeerLeave(peer.id);
+      }
+    }, 10000);
+  }
+
+  function handleJoinRequest(peerId, displayName) {
+    if (!peerId || peers.has(peerId)) return;
+    createHostPeer(peerId, displayName);
+  }
+
+  function attachHostChannel(peerId, channel) {
+    const peer = peers.get(peerId);
+    if (!peer) return;
+    peer.dc = channel;
+    channel.onopen = () => {
+      updateHostStatus();
+      sendAuthChallenge(peer);
+    };
+    channel.onmessage = event => handleHostMessage(peerId, event.data);
+    channel.onclose = () => handlePeerLeave(peerId);
+  }
+
+  async function createHostPeer(peerId, displayName) {
+    const pc = new RTCPeerConnection(rtcConfig);
+    const peer = {
+      id: peerId,
+      name: displayName || "Peer",
+      pc,
+      dc: null,
+      pendingCandidates: [],
+      remoteDescriptionSet: false,
+      authenticated: false,
+      authNonce: "",
+      authTimer: null,
+      iceState: "new",
+      announced: false
+    };
+    peers.set(peerId, peer);
+
+    pc.onicecandidate = event => {
+      if (!event.candidate) return;
+      sendSignal("candidate", { candidate: event.candidate }, peerId);
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed" || pc.connectionState === "disconnected") {
+        handlePeerLeave(peerId);
+        return;
+      }
+      updateHostStatus();
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      peer.iceState = pc.iceConnectionState;
+      updateHostIceStatus();
+    };
+
+    const channel = pc.createDataChannel("chat");
+    attachHostChannel(peerId, channel);
+    pc.ondatachannel = event => attachHostChannel(peerId, event.channel);
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendSignal("offer", { description: pc.localDescription }, peerId);
+    log({ kind: "info", text: `Offer sent to ${peer.name}` });
+  }
+
+  async function applyHostAnswer(peerId, description) {
+    const peer = peers.get(peerId);
+    if (!peer || !description) return;
+    await peer.pc.setRemoteDescription(new RTCSessionDescription(description));
+    peer.remoteDescriptionSet = true;
+    await flushHostCandidates(peer);
+  }
+
+  async function handleHostCandidate(peerId, candidateData) {
+    const peer = peers.get(peerId);
+    if (!peer || !candidateData) return;
+    const candidate = new RTCIceCandidate(candidateData);
+    if (peer.remoteDescriptionSet) {
+      try { await peer.pc.addIceCandidate(candidate); } catch {}
+    } else {
+      peer.pendingCandidates.push(candidate);
+    }
+  }
+
+  async function flushHostCandidates(peer) {
+    if (!peer.remoteDescriptionSet || !peer.pendingCandidates.length) return;
+    const pending = [...peer.pendingCandidates];
+    peer.pendingCandidates = [];
+    for (const candidate of pending) {
+      try { await peer.pc.addIceCandidate(candidate); } catch {}
+    }
+  }
+
+  function handlePeerLeave(peerId) {
+    const peer = peers.get(peerId);
+    if (!peer) return;
+    if (peer.authTimer) {
+      clearTimeout(peer.authTimer);
+    }
+    if (peer.dc) peer.dc.close();
+    if (peer.pc) peer.pc.close();
+    peers.delete(peerId);
+    if (activePeerId === peerId) activePeerId = "";
+    updateHostStatus();
+    updateHostIceStatus();
+    if (peer.name) {
+      log({ kind: "info", text: `${peer.name} disconnected` });
+      broadcastToPeers({ t: "chat", n: "System", v: `${peer.name} left` }, peerId);
+    }
+  }
+
+  function handleHostLeave() {
+    log({ kind: "info", text: "Host disconnected." });
+    reset({ preserveRole: false });
+    updateRoomStatus("Disconnected");
+  }
+
+  function handleHostMessage(peerId, data) {
+    let msg;
+    try {
+      msg = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const peer = peers.get(peerId);
+    if (!peer) return;
+    if (!peer.authenticated) {
+      if (msg.t !== "auth-response") {
+        return;
+      }
+      if (!activePassword || !peer.authNonce || !msg.v) {
+        peer.dc.send(JSON.stringify({ t: "auth-fail" }));
+        handlePeerLeave(peerId);
+        return;
+      }
+      hashValue(`${activePassword}:${peer.authNonce}`).then(expected => {
+        if (expected === msg.v) {
+          peer.authenticated = true;
+          if (peer.authTimer) clearTimeout(peer.authTimer);
+          activePeerId = peerId;
+          peer.dc.send(JSON.stringify({ t: "auth-ok" }));
+          peer.dc.send(JSON.stringify({ t: "name", v: localName }));
+          updateHostStatus();
+          updateHostIceStatus();
+        } else {
+          peer.dc.send(JSON.stringify({ t: "auth-fail" }));
+          handlePeerLeave(peerId);
+        }
+      }).catch(() => {
+        peer.dc.send(JSON.stringify({ t: "auth-fail" }));
+        handlePeerLeave(peerId);
+      });
+      return;
+    }
+    activePeerId = peerId;
+    if (msg.t && msg.t.startsWith("file-")) {
+      handleFileMessage(msg, { fromName: msg.name || peer.name, channel: peer.dc });
+      return;
+    }
+    if (msg.t === "name") {
+      const nextName = (msg.v || "Peer").trim() || "Peer";
+      peer.name = nextName;
+      if (!peer.announced) {
+        peer.announced = true;
+        log({ kind: "info", text: `${nextName} joined the chat` });
+        broadcastToPeers({ t: "chat", n: "System", v: `${nextName} joined` }, peerId);
+      }
+      return;
+    }
+    if (msg.t === "name-change") {
+      const from = (msg.from || peer.name || "Peer").trim() || "Peer";
+      const to = (msg.to || "Peer").trim() || "Peer";
+      peer.name = to;
+      log({ kind: "info", text: `${from} is now ${to}` });
+      broadcastToPeers({ t: "chat", n: "System", v: `${from} is now ${to}` }, peerId);
+      return;
+    }
+    if (msg.t === "chat") {
+      const name = (msg.n || peer.name || "Peer").trim() || "Peer";
+      log({ kind: "peer", text: msg.v || "", name });
+      broadcastToPeers({ t: "chat", n: name, v: msg.v || "" }, peerId);
+      return;
+    }
+  }
+
+  function handleFileMessage(msg, { fromName = "Peer", channel } = {}) {
+    if (!msg || !msg.t) return false;
+    if (msg.t === "file-request") {
+      if (!channel || channel.readyState !== "open") return true;
+      const node = buildFileRequestNode({
+        from: msg.name || fromName,
+        fileName: msg.fileName,
+        mime: msg.mime,
+        size: msg.size,
+        id: msg.id,
+        channel
+      });
+      log({ kind: "peer", name: msg.name || fromName, node });
+      return true;
+    }
+    if (msg.t === "file-send-start") {
+      if (!channel || channel.readyState !== "open") return true;
+      const mimeVal = msg.mime || guessMime({ name: msg.fileName });
+      const send = payload => sendPacket(channel, payload);
+      const prog = buildProgressNode({
+        label: `Receiving ${msg.fileName} (${mimeVal})`,
+        id: msg.id,
+        onCancel: () => {
+          send({ t: "file-cancel", id: msg.id });
+          const t = incomingTransfers[msg.id];
+          if (t) {
+            const cancelMsg = document.createElement("span");
+            cancelMsg.textContent = `Receive cancelled for ${t.fileName}`;
+            if (t.progNode && t.progNode.parentElement) t.progNode.parentElement.replaceChild(cancelMsg, t.progNode);
+            delete incomingTransfers[msg.id];
+          }
+        },
+        showDetails: true
+      });
+      log({ kind: "peer", name: msg.name || fromName, node: prog.wrap });
+      incomingTransfers[msg.id] = {
+        name: msg.name || fromName,
+        fileName: msg.fileName,
+        mime: mimeVal,
+        size: msg.size,
+        expectedChunks: msg.chunks,
+        receivedChunks: 0,
+        bytesReceived: 0,
+        buffers: [],
+        bar: prog.bar,
+        pct: prog.pct,
+        details: prog.details,
+        progNode: prog.wrap,
+        lastProgressSent: 0,
+        started: Date.now(),
+        send,
+        channel
+      };
+      return true;
+    }
+    if (msg.t === "file-chunk") {
+      const t = incomingTransfers[msg.id];
+      if (!t) return true;
+      const data = uint8FromBase64(msg.data);
+      t.buffers.push(data);
+      t.receivedChunks += 1;
+      t.bytesReceived = (t.bytesReceived || 0) + data.byteLength;
+      const doneBySize = t.size ? t.bytesReceived / t.size : t.receivedChunks / t.expectedChunks;
+      const done = Math.min(doneBySize || 0, 1);
+      t.bar.style.width = `${Math.floor(done * 100)}%`;
+      t.pct.textContent = `${Math.floor(done * 100)}%`;
+      if (t.details) {
+        const bytesReceived = t.bytesReceived;
+        const totalBytes = t.size || t.bytesReceived;
+        const mb = bytesReceived / (1024 * 1024);
+        const totalMb = totalBytes / (1024 * 1024);
+        const elapsed = Math.max((Date.now() - (t.started || Date.now())) / 1000, 0.001);
+        const rateMb = mb / elapsed;
+        const rateMbit = rateMb * 8;
+        const remainingMb = Math.max(totalMb - mb, 0);
+        const eta = rateMbit > 0 ? (remainingMb * 8) / rateMbit : 0;
+        t.details.textContent = `${mb.toFixed(2)} / ${totalMb.toFixed(2)} MB - ${rateMbit.toFixed(2)} Mb/s - ETA ${eta.toFixed(1)}s`;
+      }
+      const now = Date.now();
+      if (t.send && (now - t.lastProgressSent >= 500 || t.receivedChunks >= t.expectedChunks)) {
+        t.send({ t: "file-progress", id: msg.id, pct: Math.floor(done * 100) });
+        t.lastProgressSent = now;
+      }
+      if (t.receivedChunks >= t.expectedChunks) {
+        const blob = new Blob(t.buffers, { type: t.mime });
+        const url = URL.createObjectURL(blob);
+        const isMedia = isMediaType(t.mime || "", t.fileName);
+        const node = isMedia
+          ? buildMediaPreview({
+              fileName: t.fileName,
+              mime: t.mime,
+              url,
+              revokeCb: () => URL.revokeObjectURL(url)
+            })
+          : buildFileNode({
+              fileName: t.fileName,
+              mime: t.mime,
+              data: url,
+              revokeCb: () => URL.revokeObjectURL(url)
+            });
+        if (t.progNode && t.progNode.parentElement) t.progNode.parentElement.replaceChild(node, t.progNode);
+        else log({ kind: "peer", name: t.name, node });
+        if (t.send) {
+          t.send({ t: "file-received", id: msg.id, fileName: t.fileName, mime: t.mime });
+        }
+        delete incomingTransfers[msg.id];
+      }
+      return true;
+    }
+    if (msg.t === "file-accept") {
+      const pending = pendingOutgoingFiles[msg.id];
+      if (pending) {
+        sendFileChunks(msg.id, pending);
+      }
+      return true;
+    }
+    if (msg.t === "file-decline") {
+      if (pendingOutgoingFiles[msg.id]) {
+        const pending = pendingOutgoingFiles[msg.id];
+        if (pending.previewNode) replaceWithMessage(pending.previewNode, `Peer declined ${pending.file?.name || "file"}`);
+        delete pendingOutgoingFiles[msg.id];
+        log({ kind: "info", text: "Peer declined the file transfer" });
+      }
+      return true;
+    }
+    if (msg.t === "file-cancel") {
+      if (incomingTransfers[msg.id]) {
+        const t = incomingTransfers[msg.id];
+        if (t.progNode && t.progNode.parentElement) {
+          replaceWithMessage(t.progNode, `Receive cancelled for ${t.fileName}`);
+        }
+        delete incomingTransfers[msg.id];
+      }
+      if (outgoingTransfers[msg.id]) {
+        const t = outgoingTransfers[msg.id];
+        if (t.wrap && t.wrap.parentElement) {
+          replaceWithMessage(t.wrap, `Send cancelled for ${pendingOutgoingFiles[msg.id]?.file?.name || "file"}`);
+        }
+        t.cancelled = true;
+        delete outgoingTransfers[msg.id];
+      }
+      return true;
+    }
+    if (msg.t === "file-progress") {
+      const out = outgoingTransfers[msg.id];
+      if (out) {
+        out.bar.style.width = `${msg.pct}%`;
+        out.pct.textContent = `${msg.pct}%`;
+        if (out.details) {
+          const totalMb = out.size / (1024 * 1024);
+          const doneMb = (totalMb * msg.pct) / 100;
+          const elapsed = Math.max((Date.now() - out.started) / 1000, 0.001);
+          const rateMb = doneMb / elapsed;
+          const rateMbit = rateMb * 8;
+          const remainingMb = Math.max(totalMb - doneMb, 0);
+          const eta = rateMbit > 0 ? (remainingMb * 8) / rateMbit : 0;
+          out.details.textContent = `${doneMb.toFixed(2)} / ${totalMb.toFixed(2)} MB - ${rateMbit.toFixed(2)} Mb/s - ETA ${eta.toFixed(1)}s`;
+        }
+      }
+      return true;
+    }
+    if (msg.t === "file-received") {
+      const out = outgoingTransfers[msg.id];
+      if (out) {
+        const isMedia = out.isMedia || isMediaType(msg.mime || "", msg.fileName || "");
+        if (isMedia && out.wrap && out.wrap.parentElement) {
+          const line = out.wrap.closest(".log-line");
+          if (line) line.remove();
+          else out.wrap.remove();
+          if (out.previewNode) out.previewNode.style.opacity = "1";
+        } else {
+          replaceWithMessage(out.wrap, `Sent ${msg.fileName || "file"}`);
+        }
+        delete outgoingTransfers[msg.id];
+      }
+      return true;
+    }
+    return false;
   }
 
   function buildPendingFileNode({ fileName = "file", mime = "file", size = 0 }) {
@@ -190,7 +813,7 @@
     wrap.style.width = "100%";
     const label = document.createElement("span");
     const sizeMb = (size / (1024 * 1024)).toFixed(2);
-    label.textContent = `${fileName} (${mime}) • ${sizeMb} MB (waiting for accept)`;
+    label.textContent = `${fileName} (${mime}) - ${sizeMb} MB (waiting for accept)`;
     wrap.appendChild(label);
     return wrap;
   }
@@ -216,9 +839,13 @@
     }
     localName = next;
     if (save && !generatedRandom && localName) persistName(localName);
-    if (announce && dc && dc.readyState === "open" && localName !== before) {
-      dc.send(JSON.stringify({ t: "name-change", from: before, to: localName }));
-      log({ kind: "info", text: `You changed name: ${before} → ${localName}` });
+    if (announce && localName !== before) {
+      if (role === "caller") {
+        broadcastToPeers({ t: "name-change", from: before, to: localName });
+      } else if (dc && dc.readyState === "open") {
+        dc.send(JSON.stringify({ t: "name-change", from: before, to: localName }));
+      }
+      log({ kind: "info", text: `You changed name: ${before} -> ${localName}` });
       renameLogBadges("self", localName);
     }
   }
@@ -240,25 +867,109 @@
     });
   }
 
+  function getRoomCode() {
+    const code = (roomInput?.value || "").trim().toUpperCase();
+    if (roomInput && code) roomInput.value = code;
+    return code;
+  }
+
+  function getRoomPassword() {
+    const password = (passwordInput?.value || "").trim();
+    return password;
+  }
+
+  function startHost() {
+    let code = getRoomCode();
+    if (!code) {
+      code = generateRoomCode();
+      if (roomInput) roomInput.value = code;
+    }
+    const password = getRoomPassword();
+    if (!password) {
+      updateRoomStatus("Password required");
+      return;
+    }
+    activePassword = password;
+    role = "caller";
+    peers.forEach(peer => {
+      if (peer.dc) peer.dc.close();
+      if (peer.pc) peer.pc.close();
+    });
+    peers.clear();
+    hostSignalId = "";
+    reset({ preserveRole: true });
+    setStatus("connecting");
+    setWebrtcStatus("connecting");
+    connectSignal(code, password);
+    log({ kind: "info", text: `Hosting room ${code}` });
+  }
+
+  function startJoin() {
+    const code = getRoomCode();
+    if (!code) return;
+    const password = getRoomPassword();
+    if (!password) {
+      updateRoomStatus("Password required");
+      return;
+    }
+    activePassword = password;
+    role = "joiner";
+    hostSignalId = "";
+    reset({ preserveRole: true });
+    setStatus("connecting");
+    setWebrtcStatus("connecting");
+    connectSignal(code, password);
+    log({ kind: "info", text: `Joining room ${code}` });
+  }
+
+  function disconnectSession() {
+    connectNonce += 1;
+    if (role === "caller") {
+      peers.forEach(peer => {
+        sendSignal("leave", undefined, peer.id);
+        if (peer.dc) peer.dc.close();
+        if (peer.pc) peer.pc.close();
+      });
+      peers.clear();
+    } else if (role === "joiner" && hostSignalId) {
+      sendSignal("leave", undefined, hostSignalId);
+    } else {
+      sendSignal("leave");
+    }
+    closeSignal();
+    activeRoom = "";
+    hostSignalId = "";
+    activePassword = "";
+    joinAuthenticated = false;
+    reset({ preserveRole: false });
+    updateRoomStatus("Disconnected");
+  }
+
   if (roomInput) {
     const savedRoom = loadRoom();
     if (savedRoom) {
       roomInput.value = savedRoom;
-      connectSignal(savedRoom);
     }
   }
   if (newRoomBtn) {
     newRoomBtn.addEventListener("click", () => {
       const code = generateRoomCode();
       if (roomInput) roomInput.value = code;
-      connectSignal(code);
+    });
+  }
+  if (hostBtn) {
+    hostBtn.addEventListener("click", () => {
+      startHost();
     });
   }
   if (joinRoomBtn) {
     joinRoomBtn.addEventListener("click", () => {
-      const code = (roomInput?.value || "").trim();
-      if (!code) return;
-      connectSignal(code);
+      startJoin();
+    });
+  }
+  if (leaveBtn) {
+    leaveBtn.addEventListener("click", () => {
+      disconnectSession();
     });
   }
 
@@ -505,7 +1216,7 @@
     return wrap;
   }
 
-  function buildFileRequestNode({ from = "Peer", fileName = "file", mime = "", size = 0, id }) {
+  function buildFileRequestNode({ from = "Peer", fileName = "file", mime = "", size = 0, id, channel }) {
     const wrap = document.createElement("span");
     const kb = Math.round(size / 102.4) / 10;
     wrap.style.display = "flex";
@@ -516,16 +1227,14 @@
     const btn = document.createElement("button");
     btn.textContent = "Accept";
     btn.onclick = () => {
-      if (!dc || dc.readyState !== "open") return;
-      dc.send(JSON.stringify({ t: "file-accept", id }));
+      if (!sendPacket(channel, { t: "file-accept", id })) return;
       const line = wrap.closest(".log-line");
       if (line) line.remove();
     };
     const decline = document.createElement("button");
     decline.textContent = "Decline";
     decline.onclick = () => {
-      if (!dc || dc.readyState !== "open") return;
-      dc.send(JSON.stringify({ t: "file-decline", id }));
+      if (!sendPacket(channel, { t: "file-decline", id })) return;
       replaceWithMessage(wrap, `You declined ${fileName}`);
     };
     const spacer = document.createElement("span");
@@ -597,11 +1306,16 @@
     }
     statusEl.textContent = s;
     statusEl.classList.toggle("connected", s === "connected");
-    statusEl.classList.toggle("connecting", s === "connecting");
+    statusEl.classList.toggle("connecting", s === "connecting" || s === "hosting");
     const isConnected = s === "connected";
+    const isBusy = s !== "idle" && s !== "disconnected";
     chatControls.classList.toggle("hide", !isConnected);
     if (attachBtn) attachBtn.disabled = !isConnected;
     if (attachInput) attachInput.disabled = !isConnected;
+    if (hostBtn) hostBtn.disabled = isBusy;
+    if (joinRoomBtn) joinRoomBtn.disabled = isBusy;
+    if (newRoomBtn) newRoomBtn.disabled = isBusy;
+    if (leaveBtn) leaveBtn.disabled = !isBusy;
     if (!isConnected && attachInfo) {
       attachInfo.classList.add("hide");
       attachInfo.textContent = "";
@@ -609,31 +1323,6 @@
       $("msg").readOnly = false;
       pendingAttachment = null;
     }
-    if (isConnected) {
-      showCallerSection = false;
-      showJoinerSection = false;
-    } else {
-      if (role === "caller") showCallerSection = true;
-      if (role === "joiner") showJoinerSection = true;
-    }
-    updateRoleUI();
-    const shouldCollapse = isConnected;
-    callerSection.classList.toggle("collapsed", shouldCollapse);
-    joinerSection.classList.toggle("collapsed", shouldCollapse);
-  }
-
-  /* ---------- Compression helpers ---------- */
-  function encodeBundle(obj) {
-    const json = JSON.stringify(obj);
-    const compressed = pako.gzip(json);
-    return btoa(String.fromCharCode(...compressed))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  }
-
-  function decodeBundle(str) {
-    const bin = atob(str.replace(/-/g, "+").replace(/_/g, "/"));
-    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-    return JSON.parse(pako.ungzip(bytes, { to: "string" }));
   }
 
   /* ---------- WebRTC ---------- */
@@ -660,24 +1349,22 @@
     if (pc) pc.close();
     pc = dc = null;
     localCandidates = [];
-    if (!preserveRole) role = null;
+    pendingRemoteCandidates = [];
+    remoteDescriptionSet = false;
+    joinAuthenticated = false;
+    activePeerId = "";
+    if (!preserveRole) {
+      role = null;
+      hostSignalId = "";
+      activePassword = "";
+    }
     peerName = "Peer";
-    prevLocalName = localName;
     updateLocalName();
     logClearedForConnect = false;
     $("sendBtn").disabled = true;
-    $("applyAnswerBtn").disabled = true;
     setStatus("idle");
-    updateRoleUI();
-  }
-
-  function updateRoleUI() {
-    const showCaller = role === "caller" && showCallerSection;
-    const showJoiner = role === "joiner" && showJoinerSection;
-    callerSection.classList.toggle("hide", !showCaller);
-    joinerSection.classList.toggle("hide", !showJoiner);
-    chooseCallerBtn.classList.toggle("is-active", role === "caller" && showCallerSection);
-    chooseJoinerBtn.classList.toggle("is-active", role === "joiner" && showJoinerSection);
+    setStunStatus("idle");
+    setWebrtcStatus("idle");
   }
 
   function updateNote() {
@@ -726,32 +1413,8 @@
     candBox.appendChild(candPre);
     summaryGrid.appendChild(candBox);
 
-    const decodeVal = val => {
-      if (!val) return "<empty>";
-      try { return JSON.stringify(decodeBundle(val), null, 2); }
-      catch { return "<invalid>"; }
-    };
-    const grid = document.createElement("div");
-    grid.className = "debug-grid";
-    const addBox = (title, val) => {
-      const box = document.createElement("div");
-      box.className = "debug-box";
-      const h = document.createElement("h4");
-      h.textContent = title;
-      box.appendChild(h);
-      const pre = document.createElement("pre");
-      pre.textContent = decodeVal(val);
-      box.appendChild(pre);
-      grid.appendChild(box);
-    };
-    addBox("Offer (copy)", $("offerOut")?.value);
-    addBox("Offer (pasted)", $("offerIn")?.value);
-    addBox("Answer (copy)", $("answerOut")?.value);
-    addBox("Answer (pasted)", $("answerIn")?.value);
-
     debugContent.innerHTML = "";
     debugContent.appendChild(summaryGrid);
-    debugContent.appendChild(grid);
   }
 
   function showDebug(open) {
@@ -762,37 +1425,15 @@
 
   function setRole(nextRole) {
     role = nextRole;
-    showCallerSection = nextRole === "caller";
-    showJoinerSection = nextRole === "joiner";
     reset({ preserveRole: true });
-    $("offerOut").value = "";
-    $("answerIn").value = "";
-    $("offerIn").value = "";
-    $("answerOut").value = "";
-    updateRoleUI();
   }
-
-  if (chooseCallerBtn) chooseCallerBtn.onclick = () => {
-    if (role === "caller") {
-      showCallerSection = !showCallerSection;
-      updateRoleUI();
-    } else {
-      setRole("caller");
-    }
-  };
-  if (chooseJoinerBtn) chooseJoinerBtn.onclick = () => {
-    if (role === "joiner") {
-      showJoinerSection = !showJoinerSection;
-      updateRoleUI();
-    } else {
-      setRole("joiner");
-    }
-  };
   hasAcked = loadAck();
   noteVisible = false;
-  updateRoleUI();
   updateDisclaimer();
   updateNote();
+  setMqttStatus("offline");
+  setStunStatus("idle");
+  setWebrtcStatus("idle");
   if (debugToggle) debugToggle.onclick = () => showDebug(true);
   if (debugClose) debugClose.onclick = () => showDebug(false);
   if (debugModal) {
@@ -800,15 +1441,6 @@
       if (e.target === debugModal) showDebug(false);
     });
   }
-  [["offerOut"],["answerOut"]].forEach(([id])=>{
-    const el = $(id);
-    if (!el) return;
-    el.addEventListener("click", () => {
-      if (!el.value) return;
-      copyToClipboard(el.value);
-    });
-  });
-
   noteToggle.onclick = () => {
     noteVisible = !noteVisible;
     updateNote();
@@ -827,12 +1459,29 @@
     localCandidates = [];
 
     pc.onicecandidate = e => {
-      if (e.candidate) localCandidates.push(e.candidate.toJSON());
+      if (!e.candidate) return;
+      localCandidates.push(e.candidate.toJSON());
+      if (hostSignalId) {
+        sendSignal("candidate", { candidate: e.candidate }, hostSignalId);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      setStunStatus(pc.iceConnectionState);
     };
 
     pc.onconnectionstatechange = () => {
       setStatus(pc.connectionState);
-      if (pc.connectionState === "connected") $("sendBtn").disabled = false;
+      if (role === "joiner" && !joinAuthenticated && pc.connectionState === "connected") {
+        setWebrtcStatus("authenticating");
+      } else {
+        setWebrtcStatus(pc.connectionState);
+      }
+      if (pc.connectionState === "connected") {
+        if (role !== "joiner" || joinAuthenticated) {
+          $("sendBtn").disabled = false;
+        }
+      }
     };
 
     pc.ondatachannel = e => {
@@ -849,23 +1498,63 @@
         logClearedForConnect = true;
       }
       updateLocalName();
-      dc.send(JSON.stringify({ t: "name", v: localName }));
+      setStatus("connected");
+      if (role === "joiner") {
+        joinAuthenticated = false;
+        $("sendBtn").disabled = true;
+        setWebrtcStatus("authenticating");
+      } else {
+        $("sendBtn").disabled = false;
+      }
+      if (activeRoom) {
+        updateRoomStatus(`Connected to ${activeRoom}`);
+      }
     };
     dc.onmessage = e => handleMessage(e.data);
-    dc.onclose = () => log({ kind: "info", text: "DataChannel closed" });
+    dc.onclose = () => {
+      log({ kind: "info", text: "DataChannel closed" });
+      setStatus("disconnected");
+      setWebrtcStatus("disconnected");
+    };
   }
 
   function handleMessage(data) {
     try {
       const msg = JSON.parse(data);
+      if (msg.t === "auth-challenge") {
+        joinAuthenticated = false;
+        setWebrtcStatus("authenticating");
+        if (!activePassword || !msg.v) return;
+        hashValue(`${activePassword}:${msg.v}`).then(response => {
+          if (dc && dc.readyState === "open") {
+            dc.send(JSON.stringify({ t: "auth-response", v: response }));
+          }
+        }).catch(() => {});
+        return;
+      }
+      if (msg.t === "auth-ok") {
+        joinAuthenticated = true;
+        setWebrtcStatus("connected");
+        $("sendBtn").disabled = false;
+        if (dc && dc.readyState === "open") {
+          dc.send(JSON.stringify({ t: "name", v: localName }));
+        }
+        log({ kind: "info", text: "Authenticated with host." });
+        return;
+      }
+      if (msg.t === "auth-fail") {
+        joinAuthenticated = false;
+        setWebrtcStatus("auth failed");
+        log({ kind: "info", text: "Authentication failed. Disconnecting." });
+        if (dc) dc.close();
+        setStatus("disconnected");
+        return;
+      }
+      if (role === "joiner" && !joinAuthenticated) {
+        return;
+      }
       if (msg.t === "name") {
         const incomingName = (msg.v || "Peer").trim() || "Peer";
-        if (incomingName === localName) {
-          log({ kind: "info", text: "Name conflict detected. Disconnecting." });
-          try { dc.send(JSON.stringify({ t: "name-conflict" })); } catch {}
-          reset();
-          return;
-        }
         peerName = incomingName;
         log({ kind: "info", text: `Connected to ${peerName}` });
         renameLogBadges("peer", peerName);
@@ -874,20 +1563,9 @@
       if (msg.t === "name-change") {
         const from = (msg.from || peerName || "Peer").trim() || "Peer";
         const to = (msg.to || "Peer").trim() || "Peer";
-        if (to === localName) {
-          log({ kind: "info", text: "Name conflict detected. Disconnecting." });
-          try { dc.send(JSON.stringify({ t: "name-conflict" })); } catch {}
-          reset();
-          return;
-        }
         peerName = to;
         log({ kind: "info", text: `${from} is now ${to}` });
         renameLogBadges("peer", peerName);
-        return;
-      }
-      if (msg.t === "name-conflict") {
-        log({ kind: "info", text: "Disconnected: peer has the same name." });
-        reset();
         return;
       }
       if (msg.t === "chat") {
@@ -895,214 +1573,14 @@
         log({ kind: "peer", text: msg.v || "", name: peerName });
         return;
       }
-      if (msg.t === "file-request") {
-        const node = buildFileRequestNode({
-          from: msg.name || peerName,
-          fileName: msg.fileName,
-          mime: msg.mime,
-          size: msg.size,
-          id: msg.id
-        });
-        log({ kind: "peer", name: msg.name || peerName, node });
-        return;
-      }
-      if (msg.t === "file-send-start") {
-        const mimeVal = msg.mime || guessMime({ name: msg.fileName });
-        const prog = buildProgressNode({
-          label: `Receiving ${msg.fileName} (${mimeVal})`,
-          id: msg.id,
-          onCancel: () => {
-            dc.send(JSON.stringify({ t: "file-cancel", id: msg.id }));
-            const t = incomingTransfers[msg.id];
-            if (t) {
-              const cancelMsg = document.createElement("span");
-              cancelMsg.textContent = `Receive cancelled for ${t.fileName}`;
-              if (t.progNode && t.progNode.parentElement) t.progNode.parentElement.replaceChild(cancelMsg, t.progNode);
-              delete incomingTransfers[msg.id];
-            }
-          },
-          showDetails: true
-        });
-        log({ kind: "peer", name: msg.name || peerName, node: prog.wrap });
-        incomingTransfers[msg.id] = {
-          name: msg.name || peerName,
-          fileName: msg.fileName,
-          mime: mimeVal,
-          size: msg.size,
-          expectedChunks: msg.chunks,
-          receivedChunks: 0,
-          bytesReceived: 0,
-          buffers: [],
-          bar: prog.bar,
-          pct: prog.pct,
-          details: prog.details,
-          progNode: prog.wrap,
-          lastProgressSent: 0,
-          started: Date.now()
-        };
-        return;
-      }
-      if (msg.t === "file-chunk") {
-        const t = incomingTransfers[msg.id];
-        if (!t) return;
-        const data = uint8FromBase64(msg.data);
-        t.buffers.push(data);
-        t.receivedChunks += 1;
-        t.bytesReceived = (t.bytesReceived || 0) + data.byteLength;
-        const doneBySize = t.size ? t.bytesReceived / t.size : t.receivedChunks / t.expectedChunks;
-        const done = Math.min(doneBySize || 0, 1);
-        t.bar.style.width = `${Math.floor(done * 100)}%`;
-        t.pct.textContent = `${Math.floor(done * 100)}%`;
-        if (t.details) {
-          const bytesReceived = t.bytesReceived;
-          const totalBytes = t.size || t.bytesReceived;
-          const mb = bytesReceived / (1024 * 1024);
-          const totalMb = totalBytes / (1024 * 1024);
-          const elapsed = Math.max((Date.now() - (t.started || Date.now())) / 1000, 0.001);
-          const rateMb = mb / elapsed;
-          const rateMbit = rateMb * 8;
-          const remainingMb = Math.max(totalMb - mb, 0);
-          const eta = rateMbit > 0 ? (remainingMb * 8) / rateMbit : 0;
-          t.details.textContent = `${mb.toFixed(2)} / ${totalMb.toFixed(2)} MB • ${rateMbit.toFixed(2)} Mb/s • ETA ${eta.toFixed(1)}s`;
-        }
-        const now = Date.now();
-        if (dc && dc.readyState === "open" && (now - t.lastProgressSent >= 500 || t.receivedChunks >= t.expectedChunks)) {
-          dc.send(JSON.stringify({ t: "file-progress", id: msg.id, pct: Math.floor(done * 100) }));
-          t.lastProgressSent = now;
-      }
-      if (t.receivedChunks >= t.expectedChunks) {
-        const blob = new Blob(t.buffers, { type: t.mime });
-        const url = URL.createObjectURL(blob);
-          const isMedia = isMediaType(t.mime || "", t.fileName);
-          const node = isMedia
-            ? buildMediaPreview({
-                fileName: t.fileName,
-                mime: t.mime,
-                url,
-                revokeCb: () => URL.revokeObjectURL(url)
-              })
-            : buildFileNode({
-                fileName: t.fileName,
-                mime: t.mime,
-                data: url,
-                revokeCb: () => URL.revokeObjectURL(url)
-              });
-          if (t.progNode && t.progNode.parentElement) t.progNode.parentElement.replaceChild(node, t.progNode);
-          else log({ kind: "peer", name: t.name, node });
-          if (dc && dc.readyState === "open") {
-            dc.send(JSON.stringify({ t: "file-received", id: msg.id, fileName: t.fileName, mime: t.mime }));
-          }
-          delete incomingTransfers[msg.id];
-        }
-        return;
-      }
-      if (msg.t === "file-accept") {
-        const pending = pendingOutgoingFiles[msg.id];
-        if (pending && dc && dc.readyState === "open") {
-          sendFileChunks(msg.id, pending);
-        }
-        return;
-      }
-      if (msg.t === "file-decline") {
-        if (pendingOutgoingFiles[msg.id]) {
-          const pending = pendingOutgoingFiles[msg.id];
-          if (pending.previewNode) replaceWithMessage(pending.previewNode, `Peer declined ${pending.file?.name || "file"}`);
-          delete pendingOutgoingFiles[msg.id];
-          log({ kind: "info", text: "Peer declined the file transfer" });
-        }
-        return;
-      }
-      if (msg.t === "file-cancel") {
-        if (incomingTransfers[msg.id]) {
-          const t = incomingTransfers[msg.id];
-          if (t.progNode && t.progNode.parentElement) {
-            replaceWithMessage(t.progNode, `Receive cancelled for ${t.fileName}`);
-          }
-          delete incomingTransfers[msg.id];
-        }
-        if (outgoingTransfers[msg.id]) {
-          const t = outgoingTransfers[msg.id];
-          if (t.wrap && t.wrap.parentElement) {
-            replaceWithMessage(t.wrap, `Send cancelled for ${pendingOutgoingFiles[msg.id]?.file?.name || "file"}`);
-          }
-          t.cancelled = true;
-          delete outgoingTransfers[msg.id];
-        }
-        return;
-      }
-      if (msg.t === "file-progress") {
-        const out = outgoingTransfers[msg.id];
-        if (out) {
-          out.bar.style.width = `${msg.pct}%`;
-          out.pct.textContent = `${msg.pct}%`;
-          if (out.details) {
-            const totalMb = out.size / (1024 * 1024);
-            const doneMb = (totalMb * msg.pct) / 100;
-            const elapsed = Math.max((Date.now() - out.started) / 1000, 0.001);
-            const rateMb = doneMb / elapsed;
-            const rateMbit = rateMb * 8;
-            const remainingMb = Math.max(totalMb - doneMb, 0);
-            const eta = rateMbit > 0 ? (remainingMb * 8) / rateMbit : 0;
-            out.details.textContent = `${doneMb.toFixed(2)} / ${totalMb.toFixed(2)} MB • ${rateMbit.toFixed(2)} Mb/s • ETA ${eta.toFixed(1)}s`;
-          }
-        }
-        return;
-      }
-      if (msg.t === "file-received") {
-        const out = outgoingTransfers[msg.id];
-        if (out) {
-          const isMedia = out.isMedia || isMediaType(msg.mime || "", msg.fileName || "");
-          if (isMedia && out.wrap && out.wrap.parentElement) {
-            const line = out.wrap.closest(".log-line");
-            if (line) line.remove();
-            else out.wrap.remove();
-            if (out.previewNode) out.previewNode.style.opacity = "1";
-          } else {
-            replaceWithMessage(out.wrap, `Sent ${msg.fileName || "file"}`);
-          }
-          delete outgoingTransfers[msg.id];
-        }
-        return;
-      }
-      if (msg.t === "file-decline") {
-        if (pendingOutgoingFiles[msg.id]) {
-          delete pendingOutgoingFiles[msg.id];
-          log({ kind: "info", text: "Peer declined the file transfer" });
-        }
+      if (msg.t && msg.t.startsWith("file-")) {
+        handleFileMessage(msg, { fromName: msg.name || peerName, channel: dc });
         return;
       }
     } catch (err) {
       // Fallback for non-JSON payloads
     }
     log({ kind: "peer", text: data, name: peerName });
-  }
-
-function waitIce(pc) {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
-
-  return new Promise(resolve => {
-    const check = () => {
-      if (pc.iceGatheringState === "complete") {
-        pc.removeEventListener("icegatheringstatechange", check);
-        resolve();
-      }
-    };
-    pc.addEventListener("icegatheringstatechange", check);
-  });
-}
-
-  function makeBundle(desc) {
-    return encodeBundle({
-      v: 1,
-      description: desc,
-      candidates: localCandidates
-    });
-  }
-
-  function parseBundle(text) {
-    const obj = decodeBundle(text.trim());
-    if (!obj.description) throw "invalid bundle";
-    return obj;
   }
 
   function waitForBuffer(dc, threshold = 256000) {
@@ -1119,125 +1597,99 @@ function waitIce(pc) {
     });
   }
 
-  /* ---------- Caller ---------- */
-  async function createOfferFlow() {
-    if (role !== "caller") { setRole("caller"); }
-    reset({ preserveRole: true });
-    setStatus("creating-offer");
-
-    const pc = ensurePC();
-    dc = pc.createDataChannel("chat");
-    wireDC();
-
-    await pc.setLocalDescription(await pc.createOffer());
-    await waitIce(pc);
-
-    const offerBundle = makeBundle(pc.localDescription);
-    $("offerOut").value = offerBundle;
-    copyToClipboard(offerBundle);
-    $("applyAnswerBtn").disabled = false;
-    setStatus("offer-ready");
-    log({ kind: "info", text: "Offer ready" });
-    sendSignal("offer", offerBundle);
+  /* ---------- Signaling flows ---------- */
+  async function flushRemoteCandidates() {
+    if (!pc || !remoteDescriptionSet || !pendingRemoteCandidates.length) return;
+    const pending = [...pendingRemoteCandidates];
+    pendingRemoteCandidates = [];
+    for (const candidate of pending) {
+      try { await pc.addIceCandidate(candidate); } catch {}
+    }
   }
 
-  async function applyAnswerFlow() {
-    if (role !== "caller") return;
-    const bundleText = $("answerIn").value;
-    let bundle;
-    try {
-      bundle = parseBundle(bundleText);
-    } catch (e) {
-      return;
+  async function handleRemoteCandidate(candidateData) {
+    if (!candidateData) return;
+    if (!pc) ensurePC();
+    const candidate = new RTCIceCandidate(candidateData);
+    if (remoteDescriptionSet) {
+      try { await pc.addIceCandidate(candidate); } catch {}
+    } else {
+      pendingRemoteCandidates.push(candidate);
     }
-    await pc.setRemoteDescription(bundle.description);
-    for (const c of bundle.candidates) {
-      try { await pc.addIceCandidate(c); } catch {}
-    }
+  }
+
+  async function applyOfferFlow(description) {
+    if (!description) return;
+    if (role !== "joiner") role = "joiner";
+    reset({ preserveRole: true });
     setStatus("connecting");
-  }
-
-  $("createOfferBtn").onclick = () => { createOfferFlow(); };
-  $("applyAnswerBtn").onclick = () => { applyAnswerFlow(); };
-
-  /* ---------- Joiner ---------- */
-  async function applyOfferFlow() {
-    if (role !== "joiner") { setRole("joiner"); }
-    reset({ preserveRole: true });
-    setStatus("applying-offer");
-
-    const bundleText = $("offerIn").value;
-    let bundle;
-    try {
-      bundle = parseBundle(bundleText);
-    } catch (e) {
-      return;
-    }
 
     const pc = ensurePC();
+    await pc.setRemoteDescription(new RTCSessionDescription(description));
+    remoteDescriptionSet = true;
+    await flushRemoteCandidates();
 
-    await pc.setRemoteDescription(bundle.description);
-    for (const c of bundle.candidates) {
-      try { await pc.addIceCandidate(c); } catch {}
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    if (hostSignalId) {
+      sendSignal("answer", { description: pc.localDescription }, hostSignalId);
     }
-
-    await pc.setLocalDescription(await pc.createAnswer());
-    await waitIce(pc);
-
-    const answerBundle = makeBundle(pc.localDescription);
-    $("answerOut").value = answerBundle;
-    copyToClipboard(answerBundle);
-    setStatus("answer-ready");
-    log({ kind: "info", text: "Answer ready" });
-    sendSignal("answer", answerBundle);
+    log({ kind: "info", text: "Answer sent" });
   }
-
-  $("applyOfferBtn").onclick = () => { applyOfferFlow(); };
 
   /* ---------- Chat ---------- */
   $("sendBtn").onclick = () => {
-    if (!dc || dc.readyState !== "open") return;
-    const text = $("msg").value.trim();
     if (pendingAttachment) {
+      const target = getAttachmentTarget();
+      if (!target) {
+        log({ kind: "info", text: "No peer connected for file sharing." });
+        return;
+      }
       const f = pendingAttachment;
       const id = `file-${Date.now()}-${fileIdCounter++}`;
       const mime = guessMime(f);
       const url = URL.createObjectURL(f);
       const isMedia = isMediaType(mime, f.name);
+      const send = payload => sendPacket(target.channel, payload);
       if (isMedia) {
-        const previewNode = buildMediaPreview({ fileName: f.name, mime, url, revokeCb: () => URL.revokeObjectURL(url) });
+        const previewNode = buildMediaPreview({
+          fileName: f.name,
+          mime,
+          url,
+          revokeCb: () => URL.revokeObjectURL(url)
+        });
         previewNode.style.opacity = "0.6";
         log({ kind: "self", name: localName, node: previewNode });
-        pendingOutgoingFiles[id] = { file: f, mime, previewNode, replaceWithProgress: false };
+        pendingOutgoingFiles[id] = { file: f, mime, previewNode, replaceWithProgress: false, send, channel: target.channel };
         sendFileChunks(id, pendingOutgoingFiles[id]);
       } else {
         const pendingNode = buildPendingFileNode({ fileName: f.name, mime, size: f.size });
         log({ kind: "self", name: localName, node: pendingNode });
-        pendingOutgoingFiles[id] = { file: f, mime, previewNode: pendingNode };
-        dc.send(JSON.stringify({
+        pendingOutgoingFiles[id] = { file: f, mime, previewNode: pendingNode, send, channel: target.channel };
+        send({
           t: "file-request",
           id,
           name: localName,
           fileName: f.name,
           mime,
           size: f.size
-        }));
+        });
       }
-      pendingAttachment = null;
-      $("msg").value = "";
-      $("msg").readOnly = false;
-      $("msg").placeholder = "message…";
-      if (attachInfo) {
-        attachInfo.classList.add("hide");
-        attachInfo.textContent = "";
-      }
-      $("msg").classList.remove("hide");
+      clearPendingAttachmentUi();
       return;
     }
+    const text = $("msg").value.trim();
     if (!text) return;
     updateLocalName();
-    dc.send(JSON.stringify({ t: "chat", v: text, n: localName }));
-    log({ kind: "self", text, name: localName });
+    if (role === "caller") {
+      broadcastToPeers({ t: "chat", v: text, n: localName });
+      log({ kind: "self", text, name: localName });
+    } else if (dc && dc.readyState === "open") {
+      dc.send(JSON.stringify({ t: "chat", v: text, n: localName }));
+      log({ kind: "self", text, name: localName });
+    } else {
+      return;
+    }
     $("msg").value = "";
   };
 
@@ -1253,7 +1705,7 @@ function waitIce(pc) {
       $("msg").readOnly = true;
       $("msg").placeholder = "Ready to send attachment";
       if (attachInfo) {
-        attachInfo.textContent = `${f.name} • ${sizeMb} MB • ${f.type || guessMime(f)}`;
+        attachInfo.textContent = `${f.name} - ${sizeMb} MB - ${f.type || guessMime(f)}`;
         attachInfo.classList.remove("hide");
       }
       attachInput.value = "";
@@ -1267,49 +1719,25 @@ function waitIce(pc) {
     }
   });
 
-  const headerToggle = (headerEl, sectionEl) => {
-    if (!headerEl || !sectionEl) return;
-    headerEl.style.cursor = "pointer";
-    headerEl.addEventListener("click", () => {
-      const isConnected = statusEl.classList.contains("connected");
-      if (!isConnected) {
-        sectionEl.classList.remove("collapsed");
-        return;
-      }
-      sectionEl.classList.toggle("collapsed");
-    });
-  };
-  headerToggle(callerHeader, callerSection);
-  headerToggle(joinerHeader, joinerSection);
-
-  const answerIn = $("answerIn");
-  if (answerIn) {
-    answerIn.addEventListener("paste", () => {
-      setTimeout(() => applyAnswerFlow(), 0);
-    });
-  }
-
-  const offerIn = $("offerIn");
-  if (offerIn) {
-    offerIn.addEventListener("paste", () => {
-      setTimeout(() => applyOfferFlow(), 0);
-    });
-  }
-
   const CHUNK_SIZE = 64000;
   async function sendFileChunks(id, pending) {
     const file = pending.file;
     const isMedia = isMediaType(pending.mime || "", file.name);
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
     const MAX_BUFFER = 512000;
-    if (dc) dc.bufferedAmountLowThreshold = MAX_BUFFER / 2;
+    const channel = pending.channel;
+    const send = pending.send || (payload => sendPacket(channel, payload));
+    if (!channel || channel.readyState !== "open") {
+      log({ kind: "info", text: "Send failed: connection closed" });
+      delete pendingOutgoingFiles[id];
+      return;
+    }
+    if (channel) channel.bufferedAmountLowThreshold = MAX_BUFFER / 2;
     const prog = buildProgressNode({
       label: `Sending ${file.name} (${pending.mime})`,
       id,
       onCancel: () => {
-        if (dc && dc.readyState === "open") {
-          dc.send(JSON.stringify({ t: "file-cancel", id }));
-        }
+        send({ t: "file-cancel", id });
         if (outgoingTransfers[id] && outgoingTransfers[id].wrap) {
           replaceWithMessage(outgoingTransfers[id].wrap, `Send cancelled for ${file.name}`);
           outgoingTransfers[id].cancelled = true;
@@ -1334,7 +1762,7 @@ function waitIce(pc) {
       isMedia,
       previewNode: pending.previewNode
     };
-    dc.send(JSON.stringify({
+    send({
       t: "file-send-start",
       id,
       name: localName,
@@ -1342,7 +1770,7 @@ function waitIce(pc) {
       mime: pending.mime,
       size: file.size,
       chunks: totalChunks
-    }));
+    });
     let offset = 0;
     let seq = 0;
     while (offset < file.size) {
@@ -1351,27 +1779,34 @@ function waitIce(pc) {
         delete outgoingTransfers[id];
         return;
       }
-      if (!dc || dc.readyState !== "open") {
+      if (!channel || channel.readyState !== "open") {
         replaceWithMessage(prog.wrap, "Send failed: connection closed");
         delete pendingOutgoingFiles[id];
         delete outgoingTransfers[id];
         return;
       }
-      if (dc.bufferedAmount > MAX_BUFFER) {
-        await waitForBuffer(dc, MAX_BUFFER / 2);
+      if (channel.bufferedAmount > MAX_BUFFER) {
+        await waitForBuffer(channel, MAX_BUFFER / 2);
       }
       const sliceBlob = file.slice(offset, offset + CHUNK_SIZE);
       const sliceBuffer = await sliceBlob.arrayBuffer();
       const slice = new Uint8Array(sliceBuffer);
-      dc.send(JSON.stringify({
+      if (!send({
         t: "file-chunk",
         id,
         seq,
         data: base64FromUint8(slice)
-      }));
+      })) {
+        replaceWithMessage(prog.wrap, "Send failed: connection closed");
+        delete pendingOutgoingFiles[id];
+        delete outgoingTransfers[id];
+        return;
+      }
       offset += slice.length;
       seq += 1;
     }
     prog.pct.textContent = "Waiting for receiver...";
     delete pendingOutgoingFiles[id];
   }
+
+

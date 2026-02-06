@@ -6,23 +6,21 @@
     <link rel="icon" href="/images/favicon.ico" type="image/x-icon">
   <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/images/favicon-180.png">
-    <title>Manual WebRTC P2P Chat</title>
-    <meta name="description" content="Manual WebRTC P2P chat using STUN with offer/answer bundle exchange. Part of the Flims Toolset suite.">
-    <meta property="og:title" content="Flims Toolset - Manual WebRTC P2P Chat">
-    <meta property="og:description" content="Manual WebRTC P2P chat using STUN with offer/answer bundle exchange. Part of the Flims Toolset suite.">
+    <title>WebRTC P2P Chat</title>
+    <meta name="description" content="Room-based WebRTC P2P chat using MQTT signaling and STUN. Part of the Flims Toolset suite.">
+    <meta property="og:title" content="Flims Toolset - WebRTC P2P Chat">
+    <meta property="og:description" content="Room-based WebRTC P2P chat using MQTT signaling and STUN. Part of the Flims Toolset suite.">
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Flims Toolset - Manual WebRTC P2P Chat">
-    <meta name="twitter:description" content="Manual WebRTC P2P chat using STUN with offer/answer bundle exchange. Part of the Flims Toolset suite.">
+    <meta name="twitter:title" content="Flims Toolset - WebRTC P2P Chat">
+    <meta name="twitter:description" content="Room-based WebRTC P2P chat using MQTT signaling and STUN. Part of the Flims Toolset suite.">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@300;400;500;600&display=swap"></noscript>
 
-    <!-- Compression library (public CDN, no upkeep) -->
-    <script
-      src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <link rel="stylesheet" href="/tools/main.css">
     <link rel="stylesheet" href="/tools/stun/stun.css">
@@ -50,7 +48,7 @@
             </button>
           </form>
           <div class="title-stack">
-            <h1>Manual WebRTC P2P Chat</h1>
+            <h1>WebRTC P2P Chat</h1>
             <span class="pill beta-tag">Beta</span>
           </div>
         </div>
@@ -60,7 +58,7 @@
         </div>
       </div>
       <div class="note pad-wrap animated-panel" id="disclaimer">
-        Security note: direct P2P via STUN with manual bundle exchange; no relay or auth. Only share bundles with people you trust and avoid sensitive data.
+        Security note: direct P2P via STUN with MQTT signaling. The room password derives the signaling channel and is never sent. The host relays messages for the room. Only share room codes with people you trust and avoid sensitive data.
         <div class="row" style="margin-top:8px;">
           <button id="ackNoteBtn">Acknowledge</button>
         </div>
@@ -68,68 +66,35 @@
       <div id="howTo" class="note hide pad-wrap animated-panel">
         <strong>How to connect</strong>
         <ol>
-          <li>Option A (Room): pick a room code and click Join room on both devices.</li>
-          <li>Caller: click Create Offer. The offer is sent automatically.</li>
-          <li>Joiner: the offer appears and is applied automatically, then the answer is sent back.</li>
-          <li>Option B (Manual): copy/paste the Base64 bundles between devices.</li>
+          <li>Pick a room code and share it with your group.</li>
+          <li>Set a room password on every device.</li>
+          <li>Host clicks Host room. Joiner clicks Join room.</li>
+          <li>Offers, answers, and ICE candidates exchange automatically.</li>
+          <li>Host stays open so everyone can keep chatting.</li>
+          <li>Use Disconnect to reset and try again.</li>
         </ol>
-        Two computers connect peer-to-peer via STUN. Bundle strings stay local; no signaling or servers
-        involved.
-      </div>
-      <div class="row role-toggle pad-wrap">
-        <div class="role-left">
-          <button id="chooseCaller">Be Caller/Host</button>
-          <button id="chooseJoiner">Be Joiner</button>
-        </div>
-        <span class="pill status-inline" id="statusChat">idle</span>
+        Everyone connects to the host through WebRTC. The host forwards messages to the room.
       </div>
       <div class="row pad-wrap room-row">
         <div class="room-field">
           <label for="roomCode">Room code</label>
           <input id="roomCode" placeholder="Enter room code">
         </div>
+        <div class="room-field">
+          <label for="roomPassword">Room password</label>
+          <input id="roomPassword" type="password" placeholder="Required">
+        </div>
         <div class="row room-actions">
           <button id="newRoomBtn">New code</button>
+          <button id="hostBtn">Host room</button>
           <button id="joinRoomBtn">Join room</button>
+          <button id="leaveBtn" disabled>Disconnect</button>
         </div>
+        <span class="pill status-inline" id="statusChat">idle</span>
         <span class="meta-text" id="roomStatus">No room connected</span>
-      </div>
-      <div id="callerSection" class="section-wrap hide animated-panel">
-        <div class="card">
-          <h3 id="callerHeader">Caller</h3>
-          <div class="row">
-            <button id="createOfferBtn">Create Offer</button>
-            <button id="applyAnswerBtn" disabled>Apply Answer</button>
-          </div>
-          <div class="field-pair">
-            <div>
-              <label>Offer (copy)</label>
-              <textarea id="offerOut" class="copy-box" readonly></textarea>
-            </div>
-            <div>
-              <label>Paste Answer</label>
-              <textarea id="answerIn"></textarea>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="joinerSection" class="section-wrap hide animated-panel">
-        <div class="card">
-          <h3 id="joinerHeader">Joiner</h3>
-          <button id="applyOfferBtn">Apply Offer & Create Answer</button>
-
-          <div class="field-pair">
-            <div>
-              <label>Paste Offer</label>
-              <textarea id="offerIn"></textarea>
-            </div>
-            <div>
-              <label>Answer (copy)</label>
-              <textarea id="answerOut" class="copy-box" readonly></textarea>
-            </div>
-          </div>
-        </div>
+        <span class="meta-text" id="mqttStatus">MQTT: offline</span>
+        <span class="meta-text" id="stunStatus">STUN: idle</span>
+        <span class="meta-text" id="webrtcStatus">WebRTC: idle</span>
       </div>
 
       <div class="card chat-card" style="margin-top: 2px; width: 100%; padding: 12px; border: none; border-radius: 0;">
@@ -143,11 +108,12 @@
         <div id="log"></div>
         <div id="chatControls" class="row hide" style="margin-top: 10px; gap: 8px;">
           <button id="attachBtn" disabled>Attach file</button>
-          <input id="msg" placeholder="message…" style="flex:1">
+          <input id="msg" placeholder="Message" style="flex:1">
           <span id="attachInfo" class="hide" style="flex:1; color: var(--muted); font-size: 12px;"></span>
           <button id="sendBtn" disabled>Send</button>
           <input type="file" id="attachInput" class="visually-hidden-input">
         </div>
+
       </div>
       <div id="debugModal" class="debug-modal">
         <div class="debug-card">
@@ -155,7 +121,7 @@
             <strong>Debug info</strong>
             <button id="debugClose">Close</button>
           </header>
-          <pre id="debugContent">Loading…</pre>
+          <pre id="debugContent">Loading...</pre>
         </div>
       </div>
   </div>
